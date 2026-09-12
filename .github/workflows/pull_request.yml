@@ -1,0 +1,146 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: Check version increment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pvarki/config-ci-library/.github/actions/validate-bumpversion@main
+        if: github.event_name == 'pull_request'
+
+  check-project-setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check project metadata and template reminders
+        run: |
+          failed=0
+          check_no_matches() {
+            status=0
+            git grep -n -I -E "$1" -- "$2" || status=$?
+            case "$status" in
+              0) echo "$3" >&2; failed=1 ;;
+              1) ;;
+              *) exit "$status" ;;
+            esac
+          }
+          check_no_matches '[!]{4}' . 'Resolve and remove the template reminders shown above.'
+          check_no_matches '^[[:space:]]*#[[:space:]]*(homepage|repository|license)[[:space:]]*=' \
+            pyproject.toml 'Configure homepage, repository, and license instead of leaving commented placeholders.'
+          exit "$failed"
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pvarki/config-ci-library/.github/actions/setup-python@main
+        with:
+          python-version: "3.14"
+          uv-version: "0.12.13"
+      - name: Run prek checks
+        env:
+          SKIP: no-commit-to-branch
+        run: uv run --locked prek run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pvarki/config-ci-library/.github/actions/setup-python@main
+        with:
+          python-version: ${{ matrix.python-version }}
+          uv-version: "0.12.13"
+      - name: Test with pytest
+        run: uv run --locked pytest -v --junitxml=pytest.xml tests/
+      - name: Build Python distributions
+        run: uv build
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: pytest.xml
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v4
+        if: >-
+          (success() || failure()) &&
+          (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+        with:
+          report_paths: pytest.xml
+          detailed_summary: true
+          check_name: JUnit report (Python ${{ matrix.python-version }})
+
+  snyk-test:
+    name: Run Snyk test
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pvarki/config-ci-library/.github/actions/setup-python@main
+        with:
+          python-version: "3.14"
+          uv-version: "0.12.13"
+      - uses: pvarki/config-ci-library/.github/actions/snyk-test@main
+        with:
+          snyk-org: deployapp-products
+          snyk-token: ${{ secrets.SNYK_TOKEN }}
+
+  docker-build-and-verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [alpine, debian]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build test target
+        run: >-
+          docker build
+          --target test --file Dockerfile_${{ matrix.variant }}
+          --tag takoperator:test-${{ matrix.variant }} .
+      - name: Build production target
+        run: >-
+          docker build
+          --target production --file Dockerfile_${{ matrix.variant }}
+          --tag takoperator:production-${{ matrix.variant }} .
+
+  publish:
+    name: Publish Docker image
+    needs: [version-check, check-project-setup, pre-commit, test, docker-build-and-verify]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pvarki/config-ci-library/.github/actions/publish-image@main
+        with:
+          product: tak
+          component: worker
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          acr-repo: ${{ vars.ACR_REPO }}
+          acr-username: ${{ vars.ACR_USERNAME }}
+          acr-token: ${{ secrets.ACR_TOKEN }}

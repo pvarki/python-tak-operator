@@ -90,8 +90,8 @@ the running container is faster::
 Test suite
 ^^^^^^^^^^
 
-You can use the devel shell to run py.test when doing development, for CI use
-the "tox" target in the Dockerfile::
+You can use the devel shell to run pytest when doing development. To test
+multiple Python versions locally, use the "tox" target in the Dockerfile::
 
     # Docker
     docker build --ssh default --target tox -t takoperator:tox .
@@ -104,11 +104,9 @@ the "tox" target in the Dockerfile::
 Production docker
 ^^^^^^^^^^^^^^^^^
 
-GitLab CI builds the production target from both Dockerfile_alpine and
-Dockerfile_debian on every pipeline. The ``production-build`` jobs require a
-runner configured for privileged Docker-in-Docker with ``/certs/client`` shared
-between the job and service containers. See the
-`GitLab Docker-in-Docker setup <https://docs.gitlab.com/ci/docker/docker_in_docker/>`_.
+GitHub Actions builds the test and production targets from both Dockerfile_alpine
+and Dockerfile_debian for pull requests. Publishing uses the default Dockerfile
+(Alpine) for both linux/amd64 and linux/arm64. See the CI configuration below.
 
 There's a "production" target as well for running the application. Tag the image
 with the project version::
@@ -181,3 +179,37 @@ uv.lock; version bumping does not automatically create a commit or Git tag.
 
 The hook configuration remains in .pre-commit-config.yaml, which prek supports.
 System hooks invoke tools through uv so they use the project environment.
+
+
+CI configuration
+----------------
+
+GitHub Actions uses the shared actions in
+`pvarki/config-ci-library <https://github.com/pvarki/config-ci-library>`_.
+The workflows in .github/workflows cover:
+
+- Pull requests: version increment and project metadata checks, prek, pytest
+  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Alpine
+  and Debian container builds.
+- Pull requests from this repository: Snyk testing and image publishing after
+  the version, metadata, prek, test and container build checks pass. Fork pull
+  requests skip Snyk, publishing and the JUnit check report; their test artifacts
+  are still uploaded. Snyk runs independently of the publishing gate.
+- Pushes to main: Snyk monitoring and image publishing. Both workflows also
+  support manual runs; the main workflow only runs its jobs on main, and manual
+  runs of the pull request workflow skip version increment validation and
+  publishing.
+
+Published images use ``pvarki/tak-worker`` in GHCR, Docker Hub and ACR. The
+publisher creates version and latest tags on main, and PR-specific tags for
+pull requests. Configure these repository or organization settings:
+
+- Variables: ``DOCKERHUB_USERNAME``, ``ACR_REPO`` (registry hostname),
+  ``ACR_USERNAME``.
+- Secrets: ``DOCKERHUB_TOKEN``, ``ACR_TOKEN``, ``SNYK_TOKEN``.
+- The automatic ``GITHUB_TOKEN`` is granted ``packages: write`` by the
+  publishing jobs. Snyk uses the ``deployapp-products`` organization.
+
+All three registries are enabled by the workflow inputs. To disable Docker Hub
+or ACR, remove all inputs for that registry from both publishing jobs. Passing
+empty credentials makes the shared publisher fail.
