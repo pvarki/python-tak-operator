@@ -800,7 +800,7 @@ wheels = [
 
 [[package]]
 name = "takoperator"
-version = "0.1.0+260913"
+version = "0.2.0+260913"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

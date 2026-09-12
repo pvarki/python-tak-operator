@@ -113,12 +113,12 @@ There's a "production" target as well for running the application. Tag the image
 with the project version::
 
     # Docker
-    docker build --ssh default --target production -t takoperator:0.1.0-260913 .
-    docker run -it --name takoperator takoperator:0.1.0-260913
+    docker build --ssh default --target production -t takoperator:0.2.0-260913 .
+    docker run -it --name takoperator takoperator:0.2.0-260913
 
     # Podman alternative
-    podman build --ssh default --target production -t takoperator:0.1.0-260913 .
-    podman run -it --name takoperator takoperator:0.1.0-260913
+    podman build --ssh default --target production -t takoperator:0.2.0-260913 .
+    podman run -it --name takoperator takoperator:0.2.0-260913
 
 Commit uv.lock; Docker builds use uv sync --locked to detect stale dependency metadata.
 
