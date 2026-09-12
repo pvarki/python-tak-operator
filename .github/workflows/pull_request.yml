@@ -105,22 +105,16 @@ jobs:
 
   docker-build-and-verify:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [alpine, debian]
     steps:
       - uses: actions/checkout@v6
       - name: Build test target
         run: >-
           docker build
-          --target test --file Dockerfile_${{ matrix.variant }}
-          --tag takoperator:test-${{ matrix.variant }} .
+          --target test --tag takoperator:test .
       - name: Build production target
         run: >-
           docker build
-          --target production --file Dockerfile_${{ matrix.variant }}
-          --tag takoperator:production-${{ matrix.variant }} .
+          --target production --tag takoperator:production .
 
   publish:
     name: Publish Docker image

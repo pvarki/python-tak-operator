@@ -14,7 +14,8 @@ make sure our software works under docker.
 It's also a quick way to get started with a standard development environment.
 
 Each command block offers Docker and Podman alternatives; run only the block
-for your chosen engine. Both engines use the same Dockerfiles.
+for your chosen engine. Both engines use the same Debian-based Dockerfile;
+the default ``Dockerfile`` points to ``Dockerfile_debian``.
 
 SSH agent forwarding
 ^^^^^^^^^^^^^^^^^^^^
@@ -104,9 +105,9 @@ multiple Python versions locally, use the "tox" target in the Dockerfile::
 Production docker
 ^^^^^^^^^^^^^^^^^
 
-GitHub Actions builds the test and production targets from both Dockerfile_alpine
-and Dockerfile_debian for pull requests. Publishing uses the default Dockerfile
-(Alpine) for both linux/amd64 and linux/arm64. See the CI configuration below.
+GitHub Actions builds the test and production targets from the default Debian
+Dockerfile for pull requests. Publishing uses the same Dockerfile for both
+linux/amd64 and linux/arm64. See the CI configuration below.
 
 There's a "production" target as well for running the application. Tag the image
 with the project version::
@@ -119,17 +120,7 @@ with the project version::
     podman build --ssh default --target production -t takoperator:0.1.0-260913 .
     podman run -it --name takoperator takoperator:0.1.0-260913
 
-Alpine considerations
-^^^^^^^^^^^^^^^^^^^^^
-
-Alpine images are much more lightweight than Debian/Ubuntu ones so they are preferred where possible.
-There are a few potential issues however:
-
-  - Compiled extensions not available as wheels are built from source in the builder stage.
-  - Compiled extensions not compiling under Alpine. Alpine does not have certain nonstandard extensions to libc
-    enabled by default, poorly written extensions will fail to compile because they depend on these extensions
-    and do not explicitly request them to be enabled.
-  - Commit uv.lock; Docker builds use uv sync --locked to detect stale dependency metadata.
+Commit uv.lock; Docker builds use uv sync --locked to detect stale dependency metadata.
 
 
 Development
@@ -189,8 +180,8 @@ GitHub Actions uses the shared actions in
 The workflows in .github/workflows cover:
 
 - Pull requests: version increment and project metadata checks, prek, pytest
-  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Alpine
-  and Debian container builds.
+  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Debian
+  container builds.
 - Pull requests from this repository: Snyk testing and image publishing after
   the version, metadata, prek, test and container build checks pass. Fork pull
   requests skip Snyk, publishing and the JUnit check report; their test artifacts
