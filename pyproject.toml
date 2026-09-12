@@ -1,6 +1,6 @@
 [project]
 name = "takoperator"
-version = "0.1.0"
+version = "0.1.0+260913"
 description = "K8s operator that handles rasenmaeher-k8soperator CRDs to TAKServer"
 authors = [{name="Eero af Heurlin", email="eero.afheurlin@iki.fi" }]
 homepage = "https://github.com/pvarki/python-tak-operator"
