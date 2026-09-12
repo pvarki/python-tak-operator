@@ -48,7 +48,7 @@ If you add private SSH dependencies, configure an agent inside the VM and set
 with an SSH agent. Build-time ``--ssh default`` is separate from runtime mounts.
 Docker Desktop's ``/run/host-services/ssh-auth.sock`` path is specific to Docker Desktop.
 See the `Podman build options <https://docs.podman.io/en/stable/markdown/podman-build.1.html>`_
-for SSH forwarding and host gateway configuration.
+for SSH forwarding options.
 
 Creating a development container
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -56,13 +56,13 @@ Creating a development container
 Build image, create container and start it::
 
     # Docker
-    docker build --add-host=host.docker.internal:host-gateway --ssh default --target devel_shell -t takoperator:devel_shell .
-    docker create --add-host=host.docker.internal:host-gateway --name takoperator_devel -v "$(pwd):/app" -it $(echo $DOCKER_SSHAGENT) takoperator:devel_shell
+    docker build --ssh default --target devel_shell -t takoperator:devel_shell .
+    docker create --name takoperator_devel -v "$(pwd):/app" -it $(echo $DOCKER_SSHAGENT) takoperator:devel_shell
     docker start -i takoperator_devel
 
     # Podman alternative
-    podman build --add-host=host.docker.internal:host-gateway --ssh default --target devel_shell -t takoperator:devel_shell .
-    podman create --add-host=host.docker.internal:host-gateway --name takoperator_devel -v "$(pwd):/app" -it $(echo $PODMAN_SSHAGENT) takoperator:devel_shell
+    podman build --ssh default --target devel_shell -t takoperator:devel_shell .
+    podman create --name takoperator_devel -v "$(pwd):/app" -it $(echo $PODMAN_SSHAGENT) takoperator:devel_shell
     podman start -i takoperator_devel
 
 prek considerations
@@ -82,10 +82,10 @@ You need to have the container running, see above. Or alternatively use the dock
 the running container is faster::
 
     # Docker
-    docker run --add-host=host.docker.internal:host-gateway --rm -it -v "$(pwd):/app" takoperator:devel_shell -c "uv run --locked prek run --all-files"
+    docker run --rm -it -v "$(pwd):/app" takoperator:devel_shell -c "uv run --locked prek run --all-files"
 
     # Podman alternative
-    podman run --add-host=host.docker.internal:host-gateway --rm -it -v "$(pwd):/app" takoperator:devel_shell -c "uv run --locked prek run --all-files"
+    podman run --rm -it -v "$(pwd):/app" takoperator:devel_shell -c "uv run --locked prek run --all-files"
 
 Test suite
 ^^^^^^^^^^
@@ -94,12 +94,12 @@ You can use the devel shell to run py.test when doing development, for CI use
 the "tox" target in the Dockerfile::
 
     # Docker
-    docker build --add-host=host.docker.internal:host-gateway --ssh default --target tox -t takoperator:tox .
-    docker run --add-host=host.docker.internal:host-gateway --rm -it -v "$(pwd):/app" $(echo $DOCKER_SSHAGENT) takoperator:tox
+    docker build --ssh default --target tox -t takoperator:tox .
+    docker run --rm -it -v "$(pwd):/app" $(echo $DOCKER_SSHAGENT) takoperator:tox
 
     # Podman alternative
-    podman build --add-host=host.docker.internal:host-gateway --ssh default --target tox -t takoperator:tox .
-    podman run --add-host=host.docker.internal:host-gateway --rm -it -v "$(pwd):/app" $(echo $PODMAN_SSHAGENT) takoperator:tox
+    podman build --ssh default --target tox -t takoperator:tox .
+    podman run --rm -it -v "$(pwd):/app" $(echo $PODMAN_SSHAGENT) takoperator:tox
 
 Production docker
 ^^^^^^^^^^^^^^^^^
@@ -114,12 +114,12 @@ There's a "production" target as well for running the application. Tag the image
 with the project version::
 
     # Docker
-    docker build --add-host=host.docker.internal:host-gateway --ssh default --target production -t takoperator:0.1.0 .
-    docker run --add-host=host.docker.internal:host-gateway -it --name takoperator takoperator:0.1.0
+    docker build --ssh default --target production -t takoperator:0.1.0 .
+    docker run -it --name takoperator takoperator:0.1.0
 
     # Podman alternative
-    podman build --add-host=host.docker.internal:host-gateway --ssh default --target production -t takoperator:0.1.0 .
-    podman run --add-host=host.docker.internal:host-gateway -it --name takoperator takoperator:0.1.0
+    podman build --ssh default --target production -t takoperator:0.1.0 .
+    podman run -it --name takoperator takoperator:0.1.0
 
 Alpine considerations
 ^^^^^^^^^^^^^^^^^^^^^
@@ -127,7 +127,7 @@ Alpine considerations
 Alpine images are much more lightweight than Debian/Ubuntu ones so they are preferred where possible.
 There are a few potential issues however:
 
-  - Compiled extensions not available as wheels. This is mostly mitigated by our own wheel builder.
+  - Compiled extensions not available as wheels are built from source in the builder stage.
   - Compiled extensions not compiling under Alpine. Alpine does not have certain nonstandard extensions to libc
     enabled by default, poorly written extensions will fail to compile because they depend on these extensions
     and do not explicitly request them to be enabled.
