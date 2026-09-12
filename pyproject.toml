@@ -1,0 +1,64 @@
+[project]
+name = "takoperator"
+version = "0.1.0"
+description = "K8s operator that handles rasenmaeher-k8soperator CRDs to TAKServer"
+authors = [{name="Eero af Heurlin", email="eero.afheurlin@iki.fi" }]
+homepage = "https://github.com/pvarki/python-tak-operator"
+repository = "https://github.com/pvarki/python-tak-operator"
+license = "MIT"
+readme = "README.rst"
+requires-python = ">=3.12,<4.0"
+dependencies = ["libadvian>=1.9.0,<2.0", "click>=8.5.0,<9.0"]
+
+[project.scripts]
+takoperator = "takoperator.console:takoperator_cli"
+
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["_build", "buck-out"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "PL"]
+# Pylint's optional magic-value extension was not enabled previously.
+ignore = ["PLR2004"]
+
+[tool.pyrefly]
+preset = "strict"
+project-includes = ["src", "tests"]
+search-path = ["src"]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+junit_family="xunit2"
+addopts="--cov=takoperator --cov-fail-under=65 --cov-branch"
+asyncio_mode="strict"
+asyncio_default_fixture_loop_scope="function"
+
+[tool.coverage.run]
+# Measure CLI subprocesses with pytest-cov 7 and newer.
+patch = ["subprocess"]
+omit = ["tests/*"]
+branch = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1,<10.0",
+    "coverage>=7.16.0,<8.0",
+    "pytest-cov>=7.1.0,<8.0",
+    "ruff>=0.16.7,<1.0",
+    "bandit>=1.9.4,<2.0",
+    "pyrefly>=1.3.0,<2.0",
+    "prek>=0.5.2,<1.0",
+    "pytest-asyncio>=1.4.0,<2.0",
+    "bump-my-version>=1.5.1,<2.0",
+    "detect-secrets>=1.5.0,<2.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.32.0,<2.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/takoperator"]

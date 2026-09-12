@@ -1,0 +1,182 @@
+# syntax=docker/dockerfile:1.1.7-experimental
+#############################################
+# Tox testsuite for multiple python version #
+#############################################
+FROM advian/tox-base:alpine-3.24 as tox
+ARG PYTHON_VERSIONS="3.14 3.13 3.12"
+ENV PYENV_ROOT=/root/.pyenv
+ENV PATH="/opt/tox/bin:/root/.pyenv/shims:/root/.pyenv/bin:$PATH"
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /usr/local/bin/
+RUN export RESOLVED_VERSIONS=`pyenv_resolve $PYTHON_VERSIONS` \
+    && echo RESOLVED_VERSIONS=$RESOLVED_VERSIONS \
+    && for pyver in $RESOLVED_VERSIONS; do pyenv install -s $pyver; done \
+    && pyenv global $RESOLVED_VERSIONS \
+    && uv venv --python "$(pyenv which python)" /opt/tox \
+    && uv pip install --python /opt/tox/bin/python "tox>=4,<5" \
+    && apk add --no-cache \
+        git \
+        git-lfs \
+    && true
+COPY ./uv.lock ./pyproject.toml ./README.rst ./.pre-commit-config.yaml /app/
+COPY ./docker /app/docker/
+WORKDIR /app
+RUN mkdir -p src/takoperator \
+    && echo '"""placeholder"""' >src/takoperator/__init__.py \
+    && uv sync --locked \
+    && export SKIP="pyrefly,uv-lock" \
+    && uv run --locked docker/prek_init.sh \
+    && unset SKIP \
+    && rm -rf .venv
+ENTRYPOINT ["/opt/tox/bin/tox"]
+
+
+######################
+# Base builder image #
+######################
+FROM python:3.14-alpine3.24 as builder_base
+
+ENV \
+  # locale
+  LC_ALL=C.UTF-8 \
+  # python:
+  PYTHONFAULTHANDLER=1 \
+  PYTHONUNBUFFERED=1 \
+  PYTHONHASHSEED=random \
+  # pip:
+  PIP_NO_CACHE_DIR=off \
+  PIP_DISABLE_PIP_VERSION_CHECK=on \
+  PIP_DEFAULT_TIMEOUT=100 \
+  UV_PROJECT_ENVIRONMENT=/.venv \
+  PATH="/.venv/bin:$PATH"
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /uvx /usr/local/bin/
+
+
+RUN apk add --no-cache \
+        curl \
+        git \
+        git-lfs \
+        bash \
+        build-base \
+        libffi-dev \
+        linux-headers \
+        openssl \
+        openssl-dev \
+        zeromq \
+        tini \
+        openssh-client \
+        cargo \
+    # githublab ssh
+    && mkdir -p -m 0700 ~/.ssh && ssh-keyscan gitlab.com github.com | sort > ~/.ssh/known_hosts \
+    # Configure the shell environment:
+    && echo 'export PATH="/root/.local/bin:$PATH"' >>/root/.profile \
+    && export PATH="/root/.local/bin:$PATH" \
+    && true
+
+SHELL ["/bin/bash", "-lc"]
+
+
+# Copy only requirements, to cache them in docker layer:
+WORKDIR /pysetup
+COPY ./uv.lock ./pyproject.toml ./README.rst /pysetup/
+# Install basic requirements (utilizing an internal docker wheelhouse if available)
+RUN --mount=type=ssh pip3 install --upgrade pip \
+    && pip3 install --upgrade wheel virtualenv setuptools \
+    && uv export --locked --no-dev --no-emit-project --format requirements-txt --no-hashes -o /tmp/requirements.txt \
+    && pip3 wheel --wheel-dir=/tmp/wheelhouse --trusted-host host.docker.internal --find-links=http://host.docker.internal:3141 -r /tmp/requirements.txt \
+    && virtualenv /.venv && . /.venv/bin/activate && echo '. /.venv/bin/activate' >>/root/.profile \
+    && pip3 install --no-deps --trusted-host host.docker.internal --find-links=http://host.docker.internal:3141 --find-links=/tmp/wheelhouse/ -r /tmp/requirements.txt \
+    && true
+
+
+####################################
+# Base stage for production builds #
+####################################
+FROM builder_base as production_build
+# Copy entrypoint script
+COPY ./docker/entrypoint.sh /docker-entrypoint.sh
+# Only files needed by production setup
+COPY ./uv.lock ./pyproject.toml ./README.rst /app/
+COPY ./src /app/src/
+WORKDIR /app
+# Build the wheel package with uv and add it to the wheelhouse
+RUN --mount=type=ssh . /.venv/bin/activate \
+    && uv build --wheel \
+    && cp dist/*.whl /tmp/wheelhouse \
+    && chmod a+x /docker-entrypoint.sh \
+    && true
+
+
+#########################
+# Main production build #
+#########################
+FROM python:3.14-alpine3.24 as production
+COPY --from=production_build /tmp/wheelhouse /tmp/wheelhouse
+COPY --from=production_build /docker-entrypoint.sh /docker-entrypoint.sh
+WORKDIR /app
+# Install system level deps for running the package (not devel versions for building wheels)
+# and install the wheels we built in the previous step. generate default config
+RUN --mount=type=ssh apk add --no-cache \
+        bash \
+        tini \
+    && chmod a+x /docker-entrypoint.sh \
+    && WHEELFILE=`echo /tmp/wheelhouse/takoperator-*.whl` \
+    && pip3 install --trusted-host host.docker.internal --find-links=http://host.docker.internal:3141 --find-links=/tmp/wheelhouse/ "$WHEELFILE"[all] \
+    && rm -rf /tmp/wheelhouse/ \
+    # Do whatever else you need to
+    && true
+ENTRYPOINT ["/sbin/tini", "--", "/docker-entrypoint.sh"]
+
+
+#####################################
+# Base stage for development builds #
+#####################################
+FROM builder_base as devel_build
+# Install deps
+WORKDIR /pysetup
+RUN --mount=type=ssh . /.venv/bin/activate \
+    && mkdir -p src/takoperator \
+    && echo '"""placeholder"""' >src/takoperator/__init__.py \
+    && export PIP_FIND_LINKS=http://host.docker.internal:3141 \
+    && export PIP_TRUSTED_HOST=host.docker.internal \
+    && uv sync --locked \
+    && true
+
+
+#0############
+# Run tests #
+#############
+FROM devel_build as test
+COPY . /app
+WORKDIR /app
+ENTRYPOINT ["/sbin/tini", "--", "docker/entrypoint-test.sh"]
+# Re run install to get the service itself installed
+RUN --mount=type=ssh . /.venv/bin/activate \
+    && export PIP_FIND_LINKS=http://host.docker.internal:3141 \
+    && export PIP_TRUSTED_HOST=host.docker.internal \
+    && uv sync --locked \
+    && SKIP=uv-lock docker/prek_init.sh \
+    && true
+
+
+###########
+# Hacking #
+###########
+FROM devel_build as devel_shell
+# Copy everything to the image
+COPY . /app
+WORKDIR /app
+RUN uv sync --locked \
+    && apk add --no-cache zsh vim \
+    && sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+    && echo "if [ \"\$NO_WHEELHOUSE\" = \"1\" ]" >>/root/.profile \
+    && echo "then" >>/root/.profile \
+    && echo "  echo \"Wheelhouse disabled\"" >>/root/.profile \
+    && echo "else">>/root/.profile \
+    && echo "  export PIP_TRUSTED_HOST=host.docker.internal" >>/root/.profile \
+    && echo "  export PIP_FIND_LINKS=http://host.docker.internal:3141" >>/root/.profile \
+    && echo "fi" >>/root/.profile \
+    && echo ". /root/.profile" >>/root/.zshrc \
+    && uv tool install git-up \
+    && true
+ENTRYPOINT ["/bin/zsh", "-l"]
