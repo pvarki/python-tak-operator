@@ -1,4 +1,4 @@
-#!/bin/bash -l
+#!/bin/bash
 set -e
 if [ "$#" -eq 0 ]; then
   # TODO: Put your actual program start here

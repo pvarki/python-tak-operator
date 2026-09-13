@@ -1,4 +1,4 @@
-#!/bin/bash -l
+#!/bin/bash
 if [ ! -d .git ]
 then
   git init

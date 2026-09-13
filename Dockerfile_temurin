@@ -1,0 +1,148 @@
+# syntax=docker/dockerfile:1
+ARG TEMURIN_VERSION="17"
+ARG JAVA_RUNTIME_IMAGE="eclipse-temurin:${TEMURIN_VERSION}-jre-noble"
+ARG TAKSERVER_IMAGE="ghcr.io/pvarki/tak-server:5.8-RELEASE-69"
+
+FROM ${TAKSERVER_IMAGE} AS tak_server
+FROM ghcr.io/astral-sh/uv:0.12.13 AS uv_tool
+
+
+######################
+# Base builder image #
+######################
+FROM eclipse-temurin:${TEMURIN_VERSION}-jdk-noble AS builder_base
+COPY --from=uv_tool /uv /uvx /usr/local/bin/
+
+ENV LC_ALL=C.UTF-8 \
+    PYTHONFAULTHANDLER=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=random \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100 \
+    UV_PROJECT_ENVIRONMENT=/.venv \
+    UV_PYTHON=/usr/bin/python3 \
+    UV_LINK_MODE=copy \
+    PATH="/.venv/bin:$PATH"
+
+# Python headers and the JDK support building native JNI extensions.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
+        cargo \
+        curl \
+        git \
+        git-lfs \
+        libffi-dev \
+        libssl-dev \
+        openssh-client \
+        python3 \
+        python3-dev \
+        python3-pip \
+        tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p -m 0700 /root/.ssh \
+    && ssh-keyscan gitlab.com github.com | sort > /root/.ssh/known_hosts \
+    && echo '. /.venv/bin/activate' >> /root/.profile
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /pysetup
+COPY ./uv.lock ./pyproject.toml ./README.rst /pysetup/
+# Build with the same Python minor version and OS as the runtime image.
+RUN --mount=type=ssh uv export --locked --no-dev --no-emit-project \
+        --format requirements-txt --no-hashes -o /tmp/requirements.txt \
+    && python3 -m pip wheel --no-cache-dir --wheel-dir=/tmp/wheelhouse -r /tmp/requirements.txt \
+    && uv venv --python /usr/bin/python3 /.venv \
+    && uv pip install --python /.venv/bin/python --no-index \
+        --find-links=/tmp/wheelhouse -r /tmp/requirements.txt
+
+
+####################################
+# Base stage for production builds #
+####################################
+FROM builder_base AS production_build
+COPY ./uv.lock ./pyproject.toml ./README.rst /app/
+COPY ./src /app/src/
+WORKDIR /app
+RUN --mount=type=ssh uv build --wheel --out-dir /tmp/wheelhouse
+
+
+#########################
+# Main production build #
+#########################
+FROM ${JAVA_RUNTIME_IMAGE} AS production
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONFAULTHANDLER=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash \
+        libffi8 \
+        python3 \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=tak_server /opt/tak/utils/UserManager.jar /opt/tak/utils/UserManager.jar
+COPY --from=tak_server /opt/tak/version.txt /opt/tak/version.txt
+COPY --chmod=755 ./docker/entrypoint.sh /docker-entrypoint.sh
+
+WORKDIR /app
+# Neither the installer nor wheel archives become part of the runtime layers.
+RUN --mount=from=uv_tool,source=/uv,target=/usr/local/bin/uv \
+    --mount=from=production_build,source=/tmp/wheelhouse,target=/tmp/wheelhouse \
+    uv venv --python /usr/bin/python3 /opt/venv \
+    && uv pip install --no-cache --python /opt/venv/bin/python --no-index \
+        --find-links=/tmp/wheelhouse /tmp/wheelhouse/takoperator-*.whl
+ENTRYPOINT ["/usr/bin/tini", "--", "/docker-entrypoint.sh"]
+
+
+#####################################
+# Base stage for development builds #
+#####################################
+FROM builder_base AS devel_build
+COPY --from=tak_server /opt/tak/utils/UserManager.jar /opt/tak/utils/UserManager.jar
+COPY --from=tak_server /opt/tak/version.txt /opt/tak/version.txt
+RUN --mount=type=ssh mkdir -p src/takoperator \
+    && echo '"""placeholder"""' > src/takoperator/__init__.py \
+    && uv sync --locked
+
+
+#############
+# Run tests #
+#############
+FROM devel_build AS test
+COPY . /app
+WORKDIR /app
+RUN --mount=type=ssh uv sync --locked \
+    && docker/prek_init.sh
+ENTRYPOINT ["/usr/bin/tini", "--", "docker/entrypoint-test.sh"]
+
+
+################################################
+# Tox testsuite for multiple Python versions    #
+################################################
+FROM test AS tox
+ARG PYTHON_VERSIONS="3.14 3.13 3.12"
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    UV_PYTHON_BIN_DIR=/usr/local/bin
+RUN uv python install ${PYTHON_VERSIONS} \
+    && uv venv --python /usr/bin/python3 /opt/tox \
+    && uv pip install --python /opt/tox/bin/python "tox>=4,<5"
+ENTRYPOINT ["/opt/tox/bin/tox"]
+
+
+###########
+# Hacking #
+###########
+FROM devel_build AS devel_shell
+ENV PATH="$PATH:/root/.local/bin"
+COPY . /app
+WORKDIR /app
+RUN uv sync --locked \
+    && apt-get update && apt-get install -y --no-install-recommends zsh vim \
+    && rm -rf /var/lib/apt/lists/* \
+    && sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+    && echo '. /root/.profile' >> /root/.zshrc \
+    && uv tool install git-up
+ENTRYPOINT ["/bin/zsh", "-l"]
