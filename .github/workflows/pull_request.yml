@@ -135,7 +135,7 @@ jobs:
       - uses: pvarki/config-ci-library/.github/actions/publish-image@main
         with:
           product: tak
-          component: worker
+          component: operator
           dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
