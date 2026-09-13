@@ -1,4 +1,4 @@
-#!/bin/bash -l
+#!/bin/bash
 set -e
 # shellcheck disable=SC1091
 source /.venv/bin/activate

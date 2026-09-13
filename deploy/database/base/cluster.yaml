@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: tak-database
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgis:15.19-3.6.4-202608311017-standard-trixie@sha256:5c28ebba3202ff027da64bafeabb2a48983cbfec2f74ce1b36c9e635f35da763
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: cot
+      owner: martiuser
+      secret:
+        name: tak-database-app
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS postgis;
+        - CREATE EXTENSION IF NOT EXISTS pgcrypto;
+  storage:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi

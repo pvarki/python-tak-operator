@@ -1,14 +1,22 @@
 [project]
 name = "takoperator"
-version = "0.1.0+260913"
+version = "0.2.0+260913"
 description = "K8s operator that handles rasenmaeher-k8soperator CRDs to TAKServer"
 authors = [{name="Eero af Heurlin", email="eero.afheurlin@iki.fi" }]
 homepage = "https://github.com/pvarki/python-tak-operator"
 repository = "https://github.com/pvarki/python-tak-operator"
 license = "MIT"
 readme = "README.rst"
-requires-python = ">=3.12,<4.0"
-dependencies = ["libadvian>=1.9.0,<2.0", "click>=8.5.0,<9.0"]
+requires-python = ">=3.14,<4.0"
+dependencies = [
+    "libadvian>=1.9.0,<2.0",
+    "click>=8.5.0,<9.0",
+    "cloudcoil[kubernetes,operator]",
+    "pyjnius>=1.7.0,<2.0",
+]
+
+[tool.uv.sources]
+cloudcoil = { git = "https://github.com/cloudcoil/cloudcoil.git", tag = "0.8.0" }
 
 [project.scripts]
 takoperator = "takoperator.console:takoperator_cli"
@@ -16,7 +24,7 @@ takoperator = "takoperator.console:takoperator_cli"
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py314"
 extend-exclude = ["_build", "buck-out"]
 
 [tool.ruff.lint]
@@ -27,8 +35,8 @@ ignore = ["PLR2004"]
 [tool.pyrefly]
 preset = "strict"
 project-includes = ["src", "tests"]
-search-path = ["src"]
-python-version = "3.12"
+search-path = ["src", "."]
+python-version = "3.14"
 
 [tool.pytest.ini_options]
 junit_family="xunit2"
@@ -44,6 +52,7 @@ branch = true
 
 [dependency-groups]
 dev = [
+    "cloudcoil[test]",
     "pytest>=9.1.1,<10.0",
     "coverage>=7.16.0,<8.0",
     "pytest-cov>=7.1.0,<8.0",

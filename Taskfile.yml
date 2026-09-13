@@ -1,0 +1,149 @@
+version: "3"
+
+vars:
+  CONTEXT: kind-rmk8soperator
+  NAMESPACE: tak-operator-system
+  TILT_PORT: '{{env "TILT_PORT" | default "10350"}}'
+  RUNTIME:
+    sh: |
+      {{if env "KIND_EXPERIMENTAL_PROVIDER"}}
+      echo {{env "KIND_EXPERIMENTAL_PROVIDER" | shellQuote}}
+      {{else if eq OS "darwin"}}
+      test -S "$HOME/Library/Containers/com.docker.docker/Data/backend.sock" && echo docker || echo podman
+      {{else}}
+      echo docker
+      {{end}}
+
+tasks:
+  default:
+    desc: List local development tasks
+    cmd: task --list
+    silent: true
+
+  up:
+    desc: Start the sibling platform, TAK server, and TAK operator
+    aliases: [u]
+    cmd: >-
+      bash deploy/scripts/with-platform-tools.sh ../python-rasenmaeher-k8soperator
+      task platform:up tak:up operator:up
+      CONTEXT={{.CONTEXT | shellQuote}} NAMESPACE={{.NAMESPACE | shellQuote}}
+      TILT_PORT={{.TILT_PORT | shellQuote}} RUNTIME={{.RUNTIME | shellQuote}}
+
+  platform:up:
+    desc: Start or reuse the sibling's up task and wait for platform readiness
+    env:
+      KIND_EXPERIMENTAL_PROVIDER: '{{.RUNTIME}}'
+    cmd: >-
+      bash deploy/scripts/with-platform-tools.sh ../python-rasenmaeher-k8soperator
+      bash deploy/scripts/ensure-platform.sh ../python-rasenmaeher-k8soperator {{.TILT_PORT | shellQuote}}
+
+  cluster:up:
+    desc: Start or reuse the neighboring project's shared kind cluster
+    dir: ../python-rasenmaeher-k8soperator
+    cmd: task cluster:up
+
+  tak:render:
+    desc: Render the local TAK Kubernetes resources
+    cmd: kubectl kustomize deploy/overlays/local
+
+  cnpg:up:
+    desc: Install the pinned CloudNativePG operator in the local test cluster
+    cmds:
+      - kubectl --context {{.CONTEXT}} apply --server-side -k deploy/cnpg
+      - kubectl --context {{.CONTEXT}} wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=60s
+      - kubectl --context {{.CONTEXT}} -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=300s
+
+  database:up:
+    desc: Ensure CNPG and the local TAK PostgreSQL cluster are ready
+    preconditions:
+      - sh: legacy=$(kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/tak-database --ignore-not-found -o name) && test -z "$legacy"
+        msg: Migrate the standalone database first; see deploy/database/README.md.
+    cmds:
+      - task: cnpg:up
+      - bash deploy/scripts/ensure-secrets.sh
+      - kubectl --context {{.CONTEXT}} apply -k deploy/database/local
+      - task: database:wait
+
+  database:wait:
+    internal: true
+    cmd: >-
+      kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} wait
+      --for=condition=Ready cluster.postgresql.cnpg.io/tak-database --timeout=600s
+
+  tak:up:
+    desc: Deploy TAK to the existing shared test cluster
+    preconditions:
+      - kubectl --context {{.CONTEXT}} get nodes
+    cmds:
+      - task: database:up
+      - bash deploy/scripts/deploy-tak.sh {{.CONTEXT | shellQuote}} {{.NAMESPACE | shellQuote}}
+
+  tak:status:
+    desc: Show local TAK workloads and persistent storage
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get clusters.postgresql.cnpg.io,pods,services,pvc
+
+  tak:restart:
+    desc: Restart the TAK grid together and reconnect the operator
+    cmds:
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} scale deployment/tak-config deployment/tak-messaging deployment/tak-api --replicas=0
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} wait --for=delete pod -l app.kubernetes.io/name=takserver --timeout=180s
+      - task: tak:up
+      - task: operator:up
+
+  tak:logs:
+    desc: Follow TAK messaging logs
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/tak-messaging --follow
+
+  tak:forward:
+    desc: Forward the local TAK HTTPS and CoT ports to this workstation
+    deps: [tak:forward:https, tak:forward:cot]
+
+  tak:forward:https:
+    desc: Forward TAK HTTPS to localhost:8443
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/takserver 8443:8443
+
+  tak:forward:cot:
+    desc: Forward TAK CoT TLS to localhost:8089
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/tak-messaging 8089:8089
+
+  operator:build:
+    desc: Build the production operator and publish it to the shared local registry
+    cmds:
+      - task: operator:build-image
+      - task: operator:push
+
+  operator:build-image:
+    internal: true
+    cmd: docker buildx build --load --target production -t localhost:5005/takoperator:local .
+
+  operator:ensure-image:
+    internal: true
+    status:
+      - '{{.RUNTIME}} image inspect localhost:5005/takoperator:local > /dev/null 2>&1'
+    cmds:
+      - task: operator:build-image
+
+  operator:push:
+    desc: Publish the built operator to the shared local registry
+    requires:
+      vars:
+        - name: RUNTIME
+          enum: [docker, podman]
+    cmd: >-
+      {{if eq .RUNTIME "podman"}}podman push --tls-verify=false{{else}}docker push{{end}}
+      localhost:5005/takoperator:local
+
+  operator:up:
+    desc: Ensure the local image is published and deploy the operator
+    preconditions:
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/tak-config deployment/tak-messaging deployment/tak-api
+    cmds:
+      - task: operator:ensure-image
+      - task: operator:push
+      - kubectl --context {{.CONTEXT}} apply -k deploy/operator
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout restart deployment/tak-operator
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/tak-operator --timeout=300s
+
+  operator:logs:
+    desc: Follow local TAK operator logs
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/tak-operator --follow

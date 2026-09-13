@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tak-operator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: takoperator
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: takserver
+      ports:
+        - port: 47100
+          endPort: 47200
+        - port: 47500
+          endPort: 47600
