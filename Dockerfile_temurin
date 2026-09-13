@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 ARG TEMURIN_VERSION="17"
 ARG JAVA_RUNTIME_IMAGE="eclipse-temurin:${TEMURIN_VERSION}-jre-resolute"
-ARG TAKSERVER_IMAGE="ghcr.io/pvarki/tak-server:5.8-RELEASE-69"
+ARG TAKSERVER_IMAGE="ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013"
 
 FROM ${TAKSERVER_IMAGE} AS tak_server
 FROM ghcr.io/astral-sh/uv:0.12.13 AS uv_tool

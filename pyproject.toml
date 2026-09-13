@@ -12,6 +12,7 @@ dependencies = [
     "libadvian>=1.9.0,<2.0",
     "click>=8.5.0,<9.0",
     "cloudcoil[kubernetes,operator]",
+    "pyjnius>=1.7.0,<2.0",
 ]
 
 [tool.uv.sources]
