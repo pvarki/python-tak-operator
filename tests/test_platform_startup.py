@@ -22,7 +22,7 @@ case "$program" in
       elif [ -f "$PLATFORM_TEST_SESSION" ]; then
         printf '%s/Tiltfile' "$PLATFORM_TEST_REPO"
       else
-        echo 'No tilt apiserver found' >&2
+        echo "${PLATFORM_TEST_MISSING_SESSION:-No tilt apiserver found}" >&2
         exit 1
       fi
     elif [ "$PLATFORM_TEST_MODE" = unready ]; then
@@ -120,7 +120,19 @@ async def test_reuses_matching_session_and_checks_real_cluster_readiness(platfor
 
 
 @pytest.mark.asyncio
-async def test_starts_foreground_sibling_task_in_background_and_returns_when_ready(platform: PlatformHarness) -> None:
+@pytest.mark.parametrize(
+    "missing_session",
+    [
+        "No tilt apiserver found",
+        "dial tcp 127.0.0.1:54983: connect: connection refused",
+        "The connection to the server 127.0.0.1:54983 was refused - did you specify the right host or port?",
+        'Error from server (NotFound): sessions.tilt.dev "Tiltfile" not found',
+    ],
+)
+async def test_starts_foreground_sibling_task_in_background_and_returns_when_ready(
+    platform: PlatformHarness, missing_session: str
+) -> None:
+    platform.environment["PLATFORM_TEST_MISSING_SESSION"] = missing_session
     code, output = await platform.run("ready", existing=False)
     assert code == 0, output
     assert f"task --dir {platform.sibling.resolve()} up\n" in platform.commands()
@@ -128,6 +140,16 @@ async def test_starts_foreground_sibling_task_in_background_and_returns_when_rea
     assert (platform.directory / ".task/platform-up.log").is_file()
     # Startup completes while the sibling's foreground process remains running.
     os.kill(int(Path(platform.environment["PLATFORM_TEST_PID"]).read_text()), 0)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_tilt_api_error_does_not_start_another_session(platform: PlatformHarness) -> None:
+    platform.environment["PLATFORM_TEST_MISSING_SESSION"] = "Error from server (Forbidden): access denied"
+    code, output = await platform.run("ready", existing=False)
+    assert code != 0
+    assert "Forbidden" in output
+    assert "task --dir" not in platform.commands()
+    assert "kubectl" not in platform.commands()
 
 
 @pytest.mark.asyncio

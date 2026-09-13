@@ -31,6 +31,8 @@ session_exists() {
     fi
     case "$session" in
         *'No tilt apiserver found'*|*'connection refused'*|*'(NotFound)'*) return 1 ;;
+        # Tilt's kubectl client can report a stale API endpoint in this form.
+        *'The connection to the server '*' was refused'*) return 1 ;;
         *) printf '%s\n' "$session" >&2; exit 1 ;;
     esac
 }
