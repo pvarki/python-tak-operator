@@ -8,10 +8,8 @@ K8s operator that handles rasenmaeher-k8soperator CRDs to TAKServer
 Docker and Podman
 -----------------
 
-For more controlled deployments and to get rid of "works on my computer" -syndrome, we always
-make sure our software works under docker.
-
-It's also a quick way to get started with a standard development environment.
+Docker and Podman provide reproducible builds and an optional development
+environment. Use the host setup in Development_ for everyday work.
 
 Each command block offers Docker and Podman alternatives; run only the block
 for your chosen engine. Both engines use the same Temurin-based Dockerfile;
@@ -36,70 +34,26 @@ The ``JAVA_RUNTIME_IMAGE`` build argument accepts a compatible Resolute Java run
 for comparison builds; keep its Java major version aligned with ``TEMURIN_VERSION``
 (17 by default) and its Python ABI aligned with the builder.
 
-SSH agent forwarding
-^^^^^^^^^^^^^^^^^^^^
-
-Docker builds use buildkit_ (Podman does not need this setting)::
-
-    export DOCKER_BUILDKIT=1
-
-.. _buildkit: https://docs.docker.com/develop/develop-images/build_enhancements/
-
-And also the exact way for forwarding agent to running instance is different on OSX::
-
-    export DOCKER_SSHAGENT="-v /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock -e SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock"
-
-and Linux::
-
-    export DOCKER_SSHAGENT="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
-
-For Podman on Linux, use an agent socket accessible on the engine host::
-
-    export PODMAN_SSHAGENT="-v $SSH_AUTH_SOCK:$SSH_AUTH_SOCK -e SSH_AUTH_SOCK"
-
-For Podman Machine on macOS or Windows, omit runtime agent forwarding when using
-the generated project's public dependencies::
-
-    export PODMAN_SSHAGENT=""
-
-The macOS launchd agent socket cannot be bind-mounted from inside the Linux VM.
-If you add private SSH dependencies, configure an agent inside the VM and set
-``PODMAN_SSHAGENT`` using its socket path, or run the commands on a Linux host
-with an SSH agent. Build-time ``--ssh default`` is separate from runtime mounts.
-Docker Desktop's ``/run/host-services/ssh-auth.sock`` path is specific to Docker Desktop.
-See the `Podman build options <https://docs.podman.io/en/stable/markdown/podman-build.1.html>`_
-for SSH forwarding options.
-
-Creating a development container
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Optional development container
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Build image, create container and start it::
 
     # Docker
-    docker build --ssh default --target devel_shell -t takoperator:devel_shell .
-    docker create --name takoperator_devel -v "$(pwd):/app" -it $(echo $DOCKER_SSHAGENT) takoperator:devel_shell
+    docker build --target devel_shell -t takoperator:devel_shell .
+    docker create --name takoperator_devel -v "$(pwd):/app" -it takoperator:devel_shell
     docker start -i takoperator_devel
 
     # Podman alternative
-    podman build --ssh default --target devel_shell -t takoperator:devel_shell .
-    podman create --name takoperator_devel -v "$(pwd):/app" -it $(echo $PODMAN_SSHAGENT) takoperator:devel_shell
+    podman build --target devel_shell -t takoperator:devel_shell .
+    podman create --name takoperator_devel -v "$(pwd):/app" -it takoperator:devel_shell
     podman start -i takoperator_devel
 
-prek considerations
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Container checks
+^^^^^^^^^^^^^^^^
 
-If working in Docker instead of native env you need to run the prek checks in docker too::
-
-    # Docker
-    docker exec -i takoperator_devel /bin/bash -c "uv run --locked prek install --install-hooks"
-    docker exec -i takoperator_devel /bin/bash -c "uv run --locked prek run --all-files"
-
-    # Podman alternative
-    podman exec -i takoperator_devel /bin/bash -c "uv run --locked prek install --install-hooks"
-    podman exec -i takoperator_devel /bin/bash -c "uv run --locked prek run --all-files"
-
-You need to have the container running, see above. Or alternatively use the docker run syntax but using
-the running container is faster::
+Install Git hooks in the host environment as described in Development_. To also
+run checks in the development image::
 
     # Docker
     docker run --rm -it -v "$(pwd):/app" takoperator:devel_shell -c "uv run --locked prek run --all-files"
@@ -110,16 +64,16 @@ the running container is faster::
 Test suite
 ^^^^^^^^^^
 
-You can use the devel shell to run pytest when doing development. To test
-multiple Python versions locally, use the "tox" target in the Dockerfile::
+Run pytest locally with ``uv run --locked pytest -v``. The optional ``tox``
+container target provides an isolated Python test environment::
 
     # Docker
-    docker build --ssh default --target tox -t takoperator:tox .
-    docker run --rm -it -v "$(pwd):/app" $(echo $DOCKER_SSHAGENT) takoperator:tox
+    docker build --target tox -t takoperator:tox .
+    docker run --rm -it -v "$(pwd):/app" takoperator:tox
 
     # Podman alternative
-    podman build --ssh default --target tox -t takoperator:tox .
-    podman run --rm -it -v "$(pwd):/app" $(echo $PODMAN_SSHAGENT) takoperator:tox
+    podman build --target tox -t takoperator:tox .
+    podman run --rm -it -v "$(pwd):/app" takoperator:tox
 
 Production docker
 ^^^^^^^^^^^^^^^^^
@@ -141,11 +95,11 @@ There's a "production" target as well for running the application. Tag the image
 with the project version::
 
     # Docker
-    docker build --ssh default --target production -t takoperator:0.2.0-260913 .
+    docker build --target production -t takoperator:0.2.0-260913 .
     docker run -it --name takoperator takoperator:0.2.0-260913
 
     # Podman alternative
-    podman build --ssh default --target production -t takoperator:0.2.0-260913 .
+    podman build --target production -t takoperator:0.2.0-260913 .
     podman run -it --name takoperator takoperator:0.2.0-260913
 
 Commit uv.lock; Docker builds use uv sync --locked to detect stale dependency metadata.
