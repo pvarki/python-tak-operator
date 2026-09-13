@@ -52,6 +52,12 @@ spec:
         - name: initialize
           image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
           args: [/opt/scripts/firstrun.sh]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tak-database-app
+                  key: password
           envFrom:
             - configMapRef:
                 name: tak-settings
@@ -76,6 +82,11 @@ spec:
             - secretRef:
                 name: tak-secrets
           env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tak-database-app
+                  key: password
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -97,9 +108,19 @@ spec:
               mountPath: /opt/templates/TAKIgniteConfig.tpl
               subPath: TAKIgniteConfig.tpl
               readOnly: true
+            - name: java-defaults
+              mountPath: /etc/default/takserver
+              subPath: takserver
+              readOnly: true
         - name: messaging
           image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
           args: [/opt/scripts/start-tak.sh, messaging]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tak-database-app
+                  key: password
           envFrom:
             - configMapRef:
                 name: tak-settings
@@ -121,9 +142,19 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/tak/data
+            - name: java-defaults
+              mountPath: /etc/default/takserver
+              subPath: takserver
+              readOnly: true
         - name: api
           image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
           args: [/opt/scripts/start-tak.sh, api]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tak-database-app
+                  key: password
           envFrom:
             - configMapRef:
                 name: tak-settings
@@ -145,6 +176,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/tak/data
+            - name: java-defaults
+              mountPath: /etc/default/takserver
+              subPath: takserver
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -152,3 +187,6 @@ spec:
         - name: ignite-template
           configMap:
             name: tak-ignite-template
+        - name: java-defaults
+          configMap:
+            name: tak-java-defaults

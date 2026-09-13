@@ -3,13 +3,12 @@ kind: Kustomization
 namespace: tak-operator-system
 resources:
   - namespace.yaml
-  - database.yaml
   - takserver.yaml
   - network-policy.yaml
 configMapGenerator:
   - name: tak-settings
     literals:
-      - POSTGRES_ADDRESS=tak-database
+      - POSTGRES_ADDRESS=tak-database-rw
       - POSTGRES_DB=cot
       - POSTGRES_USER=martiuser
       - TAK_SERVER_ADDRESS=takserver.tak-operator-system.svc.cluster.local
@@ -31,3 +30,6 @@ configMapGenerator:
   - name: tak-ignite-template
     files:
       - TAKIgniteConfig.tpl
+  - name: tak-java-defaults
+    files:
+      - takserver=takserver-defaults.sh

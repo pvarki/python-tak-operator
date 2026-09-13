@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tak-database-legacy-import
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tak-database
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: tak-database
+      ports:
+        - port: 5432

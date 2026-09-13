@@ -19,6 +19,7 @@ Individual tasks remain available:
 
 ```sh
 task platform:up
+task cnpg:up
 task tak:render
 task tak:up
 task tak:status
@@ -27,20 +28,21 @@ task operator:up
 task operator:logs
 ```
 
-Without Task installed, the deployment commands are:
+For CNPG installation, database readiness, and commands without Task, see
+[database setup](database/README.md). Once CNPG and its database are ready:
 
 ```sh
-bash deploy/scripts/ensure-secrets.sh
 kubectl --context kind-rmk8soperator apply -k deploy/overlays/local
 kubectl --context kind-rmk8soperator -n tak-operator-system \
   rollout status deployment/takserver --timeout=600s
 ```
 
-All resources live in `tak-operator-system`. The credential helper generates
-random database, certificate, CA and administrator passwords into `tak-secrets`
-on the first run and preserves them on subsequent runs. Credentials are never
-committed. Keep that Secret together with the two PVCs: existing certificates
-and database files depend on its contents.
+TAK and its CNPG Cluster live in `tak-operator-system`; the CNPG operator runs in
+`cnpg-system`. The credential helper generates database credentials in
+`tak-database-app` and certificate, CA and administrator passwords in `tak-secrets`,
+preserving existing values on subsequent runs. Credentials are never committed.
+Keep both Secrets together with the TAK and CNPG PVCs: certificates and database
+files depend on their contents.
 
 The TAK image is pinned to the exact digest validated in the JNI handoff.
 Its standalone initialization script prepares the database schema and certificates.
@@ -51,9 +53,15 @@ reconciliation and are omitted from this development deployment. Recreate
 deployment strategy prevents two configuration services from writing the same
 volume during an update.
 
-The PostGIS image supports the shared cluster's ARM64 node. Local-path PVCs
-retain data across Pod restarts. Resource and Ignite cache sizes are deliberately
-bounded for the shared development VM.
+CNPG manages the PostgreSQL Pods, storage and primary Service `tak-database-rw`.
+The pinned PostGIS image supports the shared cluster's ARM64 node. CNPG initializes
+the database and extensions; TAK's SchemaManager creates the application schema
+using a non-superuser owner account. The local overlay runs one database instance
+with a 2 GiB PVC; `deploy/database/base` defines three instances with 10 GiB each.
+Local-path PVCs retain data across Pod restarts. Resource and Ignite cache sizes
+are bounded for the shared development VM. Follow the
+[migration instructions](database/README.md#migrating-the-previous-local-database)
+before using these tasks with the previous standalone database Deployment.
 
 The operator is a separate Kustomize bundle in `deploy/operator`.
 `task operator:up` ensures a local image exists, pushes it to the shared **local**

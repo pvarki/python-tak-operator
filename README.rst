@@ -210,7 +210,8 @@ local environment with::
     task up
 
 This ensures the sibling's registry, cluster, and platform are ready before
-starting TAK and deploying this operator. An existing local image is republished;
+installing CloudNativePG, waiting for its database Cluster, starting TAK and
+deploying this operator. An existing local image is republished;
 a missing image is built first. It reuses a Tilt session belonging to that sibling
 checkout. Otherwise it runs the sibling's
 ``task up`` in the background, with logs in ``.task/platform-up.log``. Since Tilt
@@ -222,11 +223,21 @@ startup wait in seconds (default 600). Stop Tilt using the sibling's
 Demo resources retain their manual Tilt trigger.
 
 The local Kustomize deployment uses the shared ``kind-rmk8soperator`` cluster
-and isolates TAK, PostGIS, credentials, and storage in ``tak-operator-system``.
+and isolates TAK, its CNPG PostgreSQL/PostGIS Cluster, credentials, and storage in
+``tak-operator-system``. CNPG itself runs in ``cnpg-system``.
 The TAK configuration, messaging, and API containers share a Pod and data volume,
 following ``../docker-rasenmaeher-integration/takserver``. Credentials are generated
 locally as Kubernetes Secrets; they are not committed. Existing Secrets are reused.
 The deployment pins the TAK 5.8.69 image and digest validated by the JNI handoff.
+
+``task cnpg:up`` installs the pinned database operator; ``task database:up`` also
+creates and waits for the local database. ``tak:up`` includes both steps.
+The local database has one instance and a 2 GiB PVC; the database base defines
+three instances. TAK uses CNPG's ``tak-database-rw`` service and the
+``tak-database-app`` credential Secret as a non-superuser. See
+`database setup and migration <deploy/database/README.md>`_ for the Kustomize
+bundles and the one-time import from the previous standalone database.
+Existing standalone deployments must be migrated before running ``tak:up``.
 
 For individual steps, start TAK with ``task tak:up`` and inspect it with
 ``task tak:status``. If the shared cluster is absent, run ``task cluster:up``
