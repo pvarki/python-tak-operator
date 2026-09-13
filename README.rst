@@ -14,8 +14,27 @@ make sure our software works under docker.
 It's also a quick way to get started with a standard development environment.
 
 Each command block offers Docker and Podman alternatives; run only the block
-for your chosen engine. Both engines use the same Debian-based Dockerfile;
-the default ``Dockerfile`` points to ``Dockerfile_debian``.
+for your chosen engine. Both engines use the same Temurin-based Dockerfile;
+the default ``Dockerfile`` points to ``Dockerfile_temurin``.
+
+Production uses ``eclipse-temurin:17-jre-noble`` with Ubuntu Noble's Python 3.12.
+Build, development, test and tox stages use the matching Temurin JDK, with Python
+headers and compilers available for native JNI extensions. ``JAVA_HOME`` points
+to ``/opt/java/openjdk``; the production JRE includes ``lib/server/libjvm.so``.
+
+The build copies ``/opt/tak/utils/UserManager.jar`` and ``/opt/tak/version.txt``
+from ``ghcr.io/pvarki/tak-server:5.8-RELEASE-69`` into production and development
+images. The bundled UserManager JAR provides the initial TAKServer classes for
+JNI integration; the rest of the TAKServer image is not copied. The
+``TAKSERVER_IMAGE`` build argument selects a different compatible artifact image.
+
+Runtime wheels are built for Python 3.12 on Noble and installed offline into
+``/opt/venv``. Build mounts keep uv and the wheel archives out of the final image;
+the JDK, Python headers and compilers stay in the build stages. This follows
+`python-tak-rmapi PR 154 <https://github.com/pvarki/python-tak-rmapi/pull/154>`_.
+The ``JAVA_RUNTIME_IMAGE`` build argument accepts a compatible Noble Java runtime
+for comparison builds; keep its Java major version aligned with ``TEMURIN_VERSION``
+(17 by default) and its Python ABI aligned with the builder.
 
 SSH agent forwarding
 ^^^^^^^^^^^^^^^^^^^^
@@ -105,9 +124,18 @@ multiple Python versions locally, use the "tox" target in the Dockerfile::
 Production docker
 ^^^^^^^^^^^^^^^^^
 
-GitHub Actions builds the test and production targets from the default Debian
+GitHub Actions builds the test and production targets from the default Temurin
 Dockerfile for pull requests. Publishing uses the same Dockerfile for both
 linux/amd64 and linux/arm64. See the CI configuration below.
+
+CI runs the tests inside the test image, then checks the production CLI, Python
+environment, TAKServer artifacts and JVM startup through JNI. The runtime check
+also verifies that compilers, the JDK headers, pip, uv and wheel archives are absent.
+To run it against a locally built image::
+
+    docker run --rm -i takoperator:0.2.0-260913 python < docker/check-runtime.py
+    # Podman alternative
+    podman run --rm -i takoperator:0.2.0-260913 python < docker/check-runtime.py
 
 There's a "production" target as well for running the application. Tag the image
 with the project version::
@@ -180,7 +208,7 @@ GitHub Actions uses the shared actions in
 The workflows in .github/workflows cover:
 
 - Pull requests: version increment and project metadata checks, prek, pytest
-  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Debian
+  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Temurin
   container builds.
 - Pull requests from this repository: Snyk testing and image publishing after
   the version, metadata, prek, test and container build checks pass. Fork pull
@@ -190,6 +218,9 @@ The workflows in .github/workflows cover:
   support manual runs; the main workflow only runs its jobs on main, and manual
   runs of the pull request workflow skip version increment validation and
   publishing.
+
+Run the pull request workflow manually on a feature branch: all prek hooks,
+including ``no-commit-to-branch``, remain enabled.
 
 Published images use ``pvarki/tak-worker`` in GHCR, Docker Hub and ACR. The
 publisher creates version and latest tags on main, and PR-specific tags for
