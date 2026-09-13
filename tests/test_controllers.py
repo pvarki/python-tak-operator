@@ -29,7 +29,7 @@ from takoperator.controllers import (
     ownership_for,
     referenced_users,
 )
-from takoperator.models import Group, GroupSpec, ObjectRef, Role, User, UserSpec
+from takoperator.models import Group, GroupSpec, ObjectRef, Role, User, UserBinding, UserSpec
 from takoperator.reconciliation import Ownership, ReconcileError, ReconcileOutcome, UserReconciler
 
 TEST_CREDENTIAL = secrets.token_urlsafe(24)
@@ -71,6 +71,9 @@ class FakeContext:
         self.secret = secret
         self.groups = {group.name: group for group in groups}
         self.others = [self.user]
+        self.binding: UserBinding | None = None
+        self.binding_writes: list[str] = []
+        self.binding_failure: str | None = None
 
     async def get(self, resource: Any, name: str, *, namespace: str | None = None) -> Any:
         if resource is User:
@@ -79,11 +82,46 @@ class FakeContext:
             return self.secret
         if resource is Group and name in self.groups:
             return self.groups[name]
+        if resource is UserBinding and self.binding and name == self.binding.name and namespace == "takserver":
+            return self.binding.model_copy(deep=True)
         raise ResourceNotFound("test resource absent", status_code=404)
 
     async def client(self, resource: Any) -> "FakeContext":
-        assert resource is User
+        assert resource in (User, UserBinding)
         return self
+
+    def _binding_write(self, operation: str) -> None:
+        if operation == self.binding_failure:
+            raise ResourceConflict("injected API failure", status_code=409)
+        self.binding_writes.append(operation)
+
+    async def create(self, binding: UserBinding) -> UserBinding:
+        self._binding_write("create")
+        if self.binding is not None:
+            raise ResourceConflict("binding already exists", status_code=409)
+        assert binding.metadata
+        self.binding = binding.model_copy(deep=True)
+        assert self.binding.metadata
+        self.binding.metadata.uid = "binding-uid"
+        self.binding.metadata.resource_version = "1"
+        self.binding.metadata.generation = 1
+        return self.binding.model_copy(deep=True)
+
+    async def update_status(self, binding: UserBinding) -> UserBinding:
+        self._binding_write("status")
+        assert self.binding and self.binding.metadata
+        assert binding.resource_version == self.binding.resource_version
+        assert binding.metadata and binding.metadata.uid == self.binding.metadata.uid
+        self.binding.status = binding.status.model_copy(deep=True) if binding.status else None
+        self.binding.metadata.resource_version = str(int(self.binding.resource_version or "0") + 1)
+        return self.binding.model_copy(deep=True)
+
+    async def delete(self, name: str, *, namespace: str, uid: str, resource_version: str) -> None:
+        self._binding_write("delete")
+        assert self.binding and self.binding.metadata
+        assert name == self.binding.name and namespace == self.binding.namespace
+        assert uid == self.binding.metadata.uid and resource_version == self.binding.resource_version
+        self.binding = None
 
     async def list(self) -> "FakeContext":
         return self
@@ -106,7 +144,16 @@ def test_consumed_models_and_manifests_preserve_platform_ownership() -> None:
     assert not any(obj["kind"] == "CustomResourceDefinition" for obj in manifests)
     assert app.leader_election is not None
     rules = [rule for obj in manifests for rule in obj.get("rules", [])]
-    assert not any(resource.endswith("/status") for rule in rules for resource in rule.get("resources", []))
+    assert {resource for rule in rules for resource in rule.get("resources", []) if resource.endswith("/status")} == {
+        "userbindings/status"
+    }
+    for manifest in manifests:
+        if manifest["kind"] == "ClusterRole":
+            assert not any("userbindings" in resource for rule in manifest["rules"] for resource in rule["resources"])
+    binding_controllers = [controller for controller in app.controllers if controller.resource is UserBinding]
+    assert len(binding_controllers) == 1
+    assert binding_controllers[0]._options.namespace == "tak-operator-system"
+    assert not binding_controllers[0]._options.all_namespaces
 
 
 @pytest.mark.parametrize("fields", [{}, {"publicKey": None}, {"publicKey": "legacy-platform-key"}])
@@ -220,7 +267,7 @@ async def test_revocation_does_not_need_a_secret_and_finalize_uses_owned_identit
     await handler.reconcile(user, FakeContext(user).typed())
     assert engine.reconcile.call_args.kwargs["active"] is False
     assert engine.reconcile.call_args.kwargs["credential"] is None
-    await handler.finalize(user)
+    await handler.finalize(user, FakeContext(user).typed())
     engine.finalize.assert_called_once_with(Ownership(identifier="alpha"), retain=False)
     await executor.close()
 
@@ -254,11 +301,11 @@ async def test_invalid_deletion_policy_keeps_finalizer_without_mutation() -> Non
     user.metadata.annotations[OWNERSHIP] = Ownership(identifier="alpha").model_dump_json()
     user.metadata.annotations[DELETION_POLICY] = "retain"
     with pytest.raises(ReconcileError) as caught:
-        await handler.finalize(user)
+        await handler.finalize(user, FakeContext(user).typed())
     assert caught.value.reason == "InvalidDeletionPolicy"
     engine.finalize.assert_not_called()
     user.metadata.annotations[DELETION_POLICY] = "Retain"
-    await handler.finalize(user)
+    await handler.finalize(user, FakeContext(user).typed())
     engine.finalize.assert_called_once_with(Ownership(identifier="alpha"), retain=True)
     await executor.close()
 

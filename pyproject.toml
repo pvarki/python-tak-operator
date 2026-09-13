@@ -35,7 +35,7 @@ ignore = ["PLR2004"]
 [tool.pyrefly]
 preset = "strict"
 project-includes = ["src", "tests"]
-search-path = ["src"]
+search-path = ["src", "."]
 python-version = "3.14"
 
 [tool.pytest.ini_options]

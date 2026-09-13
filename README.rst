@@ -315,9 +315,36 @@ password from a local file and reference the Secret::
 Only approved, non-revoked Users are provisioned. Revocation or removal of approval
 deletes an account owned by that User. ``spec.callsign`` becomes immutable once
 ownership is recorded. An already-existing unowned TAK account is a conflict;
-there is no automatic adoption. Deletion removes the owned account and verifies
-absence before releasing the finalizer. Set
-``tak.opendefence.fi/deletion-policy: Retain`` to retain it on CR deletion.
+there is no automatic adoption. Once User deletion is admitted, its finalizer
+removes the owned account and verifies absence. The
+``tak.opendefence.fi/deletion-policy: Retain`` setting applies only to that
+finalization; it does not bypass platform deletion checks or change revocation.
+
+User bindings
+^^^^^^^^^^^^^
+
+TAK creates one ``UserBinding`` per User in the operator namespace, named after
+the User resource with ``spec.userRef.name`` pointing back to it. A pending binding
+is recorded before TAK provisioning can write external state. Existing owned
+Users receive bindings on reconciliation, including those awaiting replacement
+credential Secrets. The binding carries a User UID owner reference and a
+``takoperator`` managed-by label; conflicting or foreign bindings are not adopted.
+
+The binding's ``Synced`` condition becomes ``True`` when the implemented TAK
+identity, credentials and ordinary group membership have converged. Pending or
+failed reconciliation sets it to ``False``. Other conditions and unchanged
+transition timestamps are preserved. The platform operator observes these
+bindings and updates the User's binding summary. Inspect TAK's records with::
+
+    kubectl --context kind-rmk8soperator -n tak-operator-system get userbindings
+
+The platform denies User deletion while any integration binding exists. Revoke
+the User or remove approval first: TAK removes its owned account, verifies
+absence, then removes its binding. Failed cleanup retains the binding for retry.
+A pending binding for an identity TAK never owned can also be released on
+revocation without deleting the unowned account. Bindings in other integration
+namespaces must be released by their owners. Deleting a TAK binding while its
+User remains active causes reconciliation to recreate it.
 
 Membership and observations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -335,7 +362,8 @@ are never mapped to ``ROLE_ADMIN`` or other file-auth privileges. Durable operat
 role assignment remains unsupported pending the separate discovery and live-client
 validation described in ``references/tak_operational_role_greenfield_reconciliation.md``.
 
-The platform controller retains ownership of ``status``. TAK publishes its result in
+The platform controller retains ownership of User, Group and Role ``status``.
+TAK owns only its local UserBinding status, and also publishes its result in
 ``tak.opendefence.fi/observed`` and a durable write-ahead ownership record in
 ``tak.opendefence.fi/ownership``. These contain no credential material. The operator
 persists ownership before external writes, rereads TAK after mutations, and retries
@@ -374,7 +402,10 @@ Validation
 ^^^^^^^^^^
 
 Unit tests cover JNI conversion, ownership checkpoints, credential rotation,
-partial-write recovery, finalizers, dependency resolution, and cancellation.
+partial-write recovery, binding status and cleanup, finalizers, dependency
+resolution, and cancellation. Local binding checks verified backfill for Bob and
+Charlie, recreation after binding deletion, unchanged foreign bindings, and
+revocation releasing an isolated test User for deletion after TAK cleanup.
 See `split-Pod validation <references/TAK_SPLIT_POD_VALIDATION.md>`_ for PR #136
 deployment, transport, persistence and recovery checks on the local cluster.
 Local live checks used the shared kind cluster and the exact handoff JAR. They

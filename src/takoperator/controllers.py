@@ -16,7 +16,8 @@ from cloudcoil.errors import ResourceConflict, ResourceNotFound
 from cloudcoil.models.kubernetes.core.v1 import Secret
 from pydantic import ValidationError
 
-from takoperator.models import Group, PlatformResource, Role, User
+from takoperator.bindings import UserBindings
+from takoperator.models import Group, PlatformResource, Role, User, UserBinding
 from takoperator.reconciliation import Credential, Ownership, ReconcileError, UserReconciler
 
 ANNOTATION_PREFIX = "tak.opendefence.fi/"
@@ -122,6 +123,7 @@ class UserController:
         self.executor = executor
         self.namespace = namespace
         self.engine: UserReconciler | None = None
+        self.bindings = UserBindings(namespace)
 
     async def _desired_groups(self, user: User, ctx: Context[User]) -> tuple[frozenset[str], list[str], bool]:
         groups: set[str] = set()
@@ -179,13 +181,33 @@ class UserController:
         if self.engine is None:
             raise RuntimeError("TAK is not connected")
         try:
+            binding = await self.bindings.get(user, ctx)
+        except ReconcileError as error:
+            observe(user, error.reason, False)
+            return Result(resource=user, requeue_after=10)
+        try:
             ownership = ownership_for(user)
         except ValidationError:
+            await self.bindings.report(binding, ctx, "InvalidOwnership", False)
             observe(user, "InvalidOwnership", False)
             return Result(resource=user, requeue_after=60)
+        active = user.spec.approved_at is not None and user.spec.revoked_at is None
+        if active and ownership is not None and binding is None:
+            # Backfill already-provisioned Users even if their Secret is missing.
+            await self._check_identity(user, ctx, active=False)
+            binding = await self.bindings.create(user, ctx)
         if ownership and ownership.identifier != user.spec.callsign:
+            await self.bindings.report(binding, ctx, "ImmutableIdentifier", False)
             observe(user, "ImmutableIdentifier", False, identifier=ownership.identifier)
             return Result(resource=user, requeue_after=60)
+        return await self._reconcile_tak(user, ctx, binding, ownership)
+
+    async def _reconcile_tak(
+        self, user: User, ctx: Context[User], binding: UserBinding | None, ownership: Ownership | None
+    ) -> Result:
+        """Reserve the binding, converge TAK, then publish or release the record."""
+        if self.engine is None:
+            raise RuntimeError("TAK is not connected")
         active = user.spec.approved_at is not None and user.spec.revoked_at is None
         groups: frozenset[str] = frozenset()
         missing: list[str] = []
@@ -196,6 +218,11 @@ class UserController:
             credential = await self._credential(user, ctx) if active else None
             if not await self._check_identity(user, ctx, active=active):
                 raise ReconcileError("DuplicateIdentifier", "Multiple platform Users have the same TAK identifier")
+            if active and binding is None:
+                # Record this integration before an external write can succeed.
+                binding = await self.bindings.create(user, ctx)
+            if not active:
+                await self.bindings.report(binding, ctx, "Deprovisioning", False)
             outcome = await self.executor.run(
                 self.engine.reconcile,
                 identifier=user.spec.callsign,
@@ -205,6 +232,10 @@ class UserController:
                 active=active,
             )
         except ReconcileError as error:
+            if binding is None and ownership is not None:
+                # A failed cleanup must continue to hold the platform deletion guard.
+                binding = await self.bindings.create(user, ctx)
+            await self.bindings.report(binding, ctx, error.reason, False)
             observe(user, error.reason, False, state=_state(error.observed))
             return Result(resource=user, requeue_after=10)
         if user.metadata is None:
@@ -215,28 +246,38 @@ class UserController:
         else:
             owned_annotations.pop(OWNERSHIP, None)
         user.metadata.annotations = owned_annotations
+        reason = "GroupNotFound" if missing and not outcome.checkpoint else outcome.reason
+        ready = outcome.ready and not missing
+        if not active and (outcome.observed is None or outcome.ownership is None):
+            # An unowned same-name TAK account is not this integration's User.
+            await self.bindings.delete(binding, ctx)
+        else:
+            await self.bindings.report(binding, ctx, reason, ready)
         observe(
             user,
-            "GroupNotFound" if missing and not outcome.checkpoint else outcome.reason,
-            outcome.ready and not missing,
+            reason,
+            ready,
             state=_state(outcome.observed),
             missingGroups=missing,
             operationalRoles="Unsupported" if operational_roles else "NotRequested",
         )
         return Result(resource=user, requeue_after=1 if outcome.checkpoint else 60)
 
-    async def finalize(self, user: User) -> None:
+    async def finalize(self, user: User, ctx: Context[User]) -> None:
         """Delete only the identity recorded before provisioning this resource."""
         if self.engine is None:
             raise RuntimeError("TAK is not connected")
         policy = annotations(user).get(DELETION_POLICY, "Delete")
         if policy not in ("Delete", "Retain"):
             raise ReconcileError("InvalidDeletionPolicy", "Deletion policy must be Delete or Retain")
+        binding = await self.bindings.get(user, ctx)
+        await self.bindings.report(binding, ctx, "Deprovisioning", False)
         await self.executor.run(
             self.engine.finalize,
             ownership_for(user),
             retain=policy == "Retain",
         )
+        await self.bindings.delete(binding, ctx)
 
 
 def _state(observed: Any) -> dict[str, Any] | None:
@@ -275,6 +316,23 @@ def register_controllers(app: Application, handler: UserController) -> Controlle
         Controller(
             Secret,
             reconcile=secret_changed,
+            namespace=handler.namespace,
+            report_status=False,
+            status_updates=False,
+            events=False,
+        )
+    )
+
+    async def binding_changed(request: Request[UserBinding]) -> None:
+        # Keep this watch namespaced too. Deterministic names also map deletions
+        # and a tampered userRef back to the original User for a fresh live read.
+        if users.ready:
+            users.enqueue(ResourceKey(request.key.name))
+
+    app.include(
+        Controller(
+            UserBinding,
+            reconcile=binding_changed,
             namespace=handler.namespace,
             report_status=False,
             status_updates=False,

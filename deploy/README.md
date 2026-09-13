@@ -121,7 +121,13 @@ build or push failure stops `operator:up` before it changes the Deployment. The 
 runs as a non-root user, stores its JVM runtime files in an `emptyDir`, and
 uses a namespace-local `takoperator` Lease for leader election. Its RBAC reads
 and patches platform resources, reads local credential Secrets, and updates
-the Lease. It has no permission to modify platform status or CRDs.
+the Lease. A namespaced Role also grants access to create/delete TAK's
+UserBindings and update their status. UserBinding watches stay in this namespace;
+the operator cannot update User/Group/Role status or install CRDs.
+Each provisioned User gets a binding with its Kubernetes name, a User UID owner
+reference and a `Synced` condition. The platform blocks User deletion while any
+binding remains; revoke first and let each integration finish cleanup. See
+[binding lifecycle](../README.rst#user-bindings) for details.
 Recreate strategy also avoids a rollout deadlock: Cloudcoil marks only the
 leader ready, so the old Pod must release its Lease before the new Pod can
 become ready.

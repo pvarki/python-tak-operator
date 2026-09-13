@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 
 from cloudcoil.pydantic import BaseModel
 from cloudcoil.resources import Resource
+from cloudcoil.controller import ReconcileStatus
 from pydantic import ConfigDict, Field
 
 
@@ -73,3 +74,31 @@ class Role(PlatformResource):
     __cloudcoil_api__: ClassVar[dict[str, Any]] = {"plural": "roles", "scope": "Cluster", "status": False}
     kind: Any | None = "Role"
     spec: RoleSpec
+
+
+class UserBindingSpec(BaseModel):
+    """The integration namespace identifies the service provisioning this User."""
+
+    model_config = ConfigDict(extra="allow")
+    user_ref: ObjectRef = Field(alias="userRef")
+
+
+class UserBindingStatus(ReconcileStatus):
+    """Standard Synced condition, matching the platform-owned CRD."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class UserBinding(Resource):
+    """Externally installed binding whose status is owned by this integration."""
+
+    model_config = ConfigDict(extra="allow")
+    __cloudcoil_api__: ClassVar[dict[str, Any]] = {
+        "plural": "userbindings",
+        "scope": "Namespaced",
+        "status": True,
+    }
+    api_version: Any | None = Field(default="platform.opendefence.fi/v1alpha1", alias="apiVersion")
+    kind: Any | None = "UserBinding"
+    spec: UserBindingSpec
+    status: UserBindingStatus | None = None

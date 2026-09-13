@@ -8,6 +8,7 @@ from cloudcoil.controller import HealthServer
 from cloudcoil.models.kubernetes.core.v1 import Secret
 
 from takoperator.controllers import SerializedExecutor, UserController, register_controllers
+from takoperator.models import UserBinding
 from takoperator.reconciliation import UserReconciler
 from takoperator.runtime import TakJvmRuntime, TakJvmSettings
 
@@ -20,7 +21,11 @@ def create_application(namespace: str | None = None) -> Application:
         namespace=namespace,
         leader_election=True,
         health=HealthServer(host="0.0.0.0", port=8080),  # nosec B104: Kubernetes probes need the Pod interface
-        rules=(RBACRule(Secret, ("get", "list", "watch"), plural="secrets", scope="Namespaced"),),
+        rules=(
+            RBACRule(Secret, ("get", "list", "watch"), plural="secrets", scope="Namespaced"),
+            RBACRule(UserBinding, ("get", "list", "watch", "create", "delete")),
+            RBACRule(UserBinding, ("update",), subresources=("status",)),
+        ),
     )
     executor = SerializedExecutor()
     handler = UserController(executor, namespace)

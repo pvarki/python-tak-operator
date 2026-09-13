@@ -67,6 +67,7 @@ tilt wait --host 127.0.0.1 --port "$TILT_PORT" \
     --for=create --for=condition=UpToDate --for=condition=Ready --timeout="${startup_timeout}s" \
     uiresource/opendefence-platform
 kubectl --context "$context" wait --for=condition=Established --timeout=60s \
-    crd/users.platform.opendefence.fi crd/groups.platform.opendefence.fi crd/roles.platform.opendefence.fi
+    crd/users.platform.opendefence.fi crd/groups.platform.opendefence.fi crd/roles.platform.opendefence.fi \
+    crd/userbindings.platform.opendefence.fi
 kubectl --context "$context" -n opendefence-system rollout status \
     deployment/opendefence-platform --timeout="${startup_timeout}s"
