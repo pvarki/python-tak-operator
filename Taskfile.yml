@@ -1,0 +1,80 @@
+version: "3"
+
+vars:
+  CONTEXT: kind-rmk8soperator
+  NAMESPACE: tak-operator-system
+  RUNTIME:
+    sh: |
+      {{if env "KIND_EXPERIMENTAL_PROVIDER"}}
+      echo {{env "KIND_EXPERIMENTAL_PROVIDER" | shellQuote}}
+      {{else if eq OS "darwin"}}
+      test -S "$HOME/Library/Containers/com.docker.docker/Data/backend.sock" && echo docker || echo podman
+      {{else}}
+      echo docker
+      {{end}}
+
+tasks:
+  default:
+    desc: List local development tasks
+    cmd: task --list
+    silent: true
+
+  cluster:up:
+    desc: Start or reuse the neighboring project's shared kind cluster
+    dir: ../python-rasenmaeher-k8soperator
+    cmd: task cluster:up
+
+  tak:render:
+    desc: Render the local TAK Kubernetes resources
+    cmd: kubectl kustomize deploy/overlays/local
+
+  tak:up:
+    desc: Deploy TAK to the existing shared test cluster
+    preconditions:
+      - kubectl --context {{.CONTEXT}} get nodes
+    cmds:
+      - bash deploy/scripts/ensure-secrets.sh
+      - kubectl --context {{.CONTEXT}} apply -k deploy/overlays/local
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/tak-database --timeout=180s
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/takserver --timeout=600s
+
+  tak:status:
+    desc: Show local TAK workloads and persistent storage
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get pods,services,pvc
+
+  tak:logs:
+    desc: Follow TAK messaging logs
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/takserver -c messaging --follow
+
+  tak:forward:
+    desc: Forward the local TAK HTTPS and CoT ports to this workstation
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/takserver 8443:8443 8089:8089
+
+  operator:build:
+    desc: Build the production operator and publish it to the shared local registry
+    cmds:
+      - docker buildx build --load --target production -t localhost:5005/takoperator:local .
+      - task: operator:push
+
+  operator:push:
+    desc: Publish the built operator to the shared local registry
+    requires:
+      vars:
+        - name: RUNTIME
+          enum: [docker, podman]
+    cmd: >-
+      {{if eq .RUNTIME "podman"}}podman push --tls-verify=false{{else}}docker push{{end}}
+      localhost:5005/takoperator:local
+
+  operator:up:
+    desc: Deploy the locally built operator alongside the running TAK server
+    preconditions:
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/takserver
+    cmds:
+      - kubectl --context {{.CONTEXT}} apply -k deploy/operator
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout restart deployment/tak-operator
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/tak-operator --timeout=300s
+
+  operator:logs:
+    desc: Follow local TAK operator logs
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/tak-operator --follow

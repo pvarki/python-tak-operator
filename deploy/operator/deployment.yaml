@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tak-operator
+spec:
+  replicas: 1
+  # Cloudcoil marks only the leader ready; a surge rollout would wait forever
+  # for the new Pod to acquire the old, still-ready Pod's Lease.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: takoperator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: takoperator
+    spec:
+      serviceAccountName: tak-operator
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: localhost:5005/takoperator:local
+          imagePullPolicy: Always
+          args: [takoperator, -v, run]
+          # TAKCL creates ignite/work relative to the process directory.
+          workingDir: /var/run/takoperator
+          env:
+            - name: CLOUDCOIL_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TAK_IGNITE_HOST
+              value: takserver
+            - name: TAK_IGNITE_BIND_ADDRESS
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: TAK_RUNTIME_DIR
+              value: /var/run/takoperator
+            - name: IGNITE_WORK_DIR
+              value: /var/run/takoperator/temporary
+          ports:
+            - name: health
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: runtime
+              mountPath: /var/run/takoperator
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: temporary
+          emptyDir: {}

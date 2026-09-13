@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: takserver
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: takserver
+  ports:
+    - name: cot
+      port: 8089
+      targetPort: cot
+    - name: https
+      port: 8443
+      targetPort: https
+    - name: ignite-discovery
+      port: 47500
+      targetPort: 47500
+    - name: ignite-communication
+      port: 47100
+      targetPort: 47100
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tak-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: takserver
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: takserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: takserver
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: initialize
+          image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
+          args: [/opt/scripts/firstrun.sh]
+          envFrom:
+            - configMapRef:
+                name: tak-settings
+            - secretRef:
+                name: tak-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/tak/data
+      containers:
+        - name: config
+          image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
+          args: [/opt/scripts/start-tak.sh, config]
+          envFrom:
+            - configMapRef:
+                name: tak-settings
+            - secretRef:
+                name: tak-secrets
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          readinessProbe:
+            tcpSocket:
+              port: 47500
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/tak/data
+            - name: ignite-template
+              mountPath: /opt/templates/TAKIgniteConfig.tpl
+              subPath: TAKIgniteConfig.tpl
+              readOnly: true
+        - name: messaging
+          image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
+          args: [/opt/scripts/start-tak.sh, messaging]
+          envFrom:
+            - configMapRef:
+                name: tak-settings
+            - secretRef:
+                name: tak-secrets
+          ports:
+            - name: cot
+              containerPort: 8089
+          readinessProbe:
+            tcpSocket:
+              port: cot
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/tak/data
+        - name: api
+          image: ghcr.io/pvarki/tak-server:5.8.69-2609122002-pr134@sha256:04d58dd4b1154ec5232f27131c03affabbf98e6dbc39a4f88ba53066db46e013
+          args: [/opt/scripts/start-tak.sh, api]
+          envFrom:
+            - configMapRef:
+                name: tak-settings
+            - secretRef:
+                name: tak-secrets
+          ports:
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/tak/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: tak-data
+        - name: ignite-template
+          configMap:
+            name: tak-ignite-template

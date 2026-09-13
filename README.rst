@@ -241,3 +241,136 @@ pull requests. Configure these repository or organization settings:
 All three registries are enabled by the workflow inputs. To disable Docker Hub
 or ACR, remove all inputs for that registry from both publishing jobs. Passing
 empty credentials makes the shared publisher fail.
+
+
+Local TAK operator
+------------------
+
+The operator consumes the existing cluster-scoped ``User``, ``Group``, and
+``Role`` resources in ``platform.opendefence.fi/v1alpha1``. Install their CRDs
+and platform controller from ``../python-rasenmaeher-k8soperator`` first. This
+repository does not install or change those CRDs.
+
+The local Kustomize deployment uses the shared ``kind-rmk8soperator`` cluster
+and isolates TAK, PostGIS, credentials, and storage in ``tak-operator-system``.
+The TAK configuration, messaging, and API containers share a Pod and data volume,
+following ``../docker-rasenmaeher-integration/takserver``. Credentials are generated
+locally as Kubernetes Secrets; they are not committed. Existing Secrets are reused.
+The deployment pins the TAK 5.8.69 image and digest validated by the JNI handoff.
+
+Start TAK with ``task tak:up`` and inspect it with ``task tak:status``. If the
+shared cluster is absent, run ``task cluster:up`` first. This delegates cluster
+creation to the neighboring project. ``task tak:forward`` exposes HTTPS 8443 and
+CoT TLS 8089 on the workstation. Removing a Deployment leaves its persistent
+volumes intact; no cluster reset is required.
+
+Build and start the operator with::
+
+    task operator:build
+    task operator:up
+    task operator:logs
+
+The build requires Docker Buildx; on the local macOS setup it uses Podman's Docker
+API. The push task selects Podman or Docker using the neighboring project's runtime
+convention. Images are pushed only to the shared local registry at ``localhost:5005``.
+
+Run ``takoperator manifests`` to inspect operator RBAC without connecting to Java
+or Kubernetes. Run ``takoperator run`` to start reconciliation. In a container,
+configure ``CLOUDCOIL_NAMESPACE=tak-operator-system`` and use the deployment under
+``deploy/operator``. The process joins Ignite only after acquiring its Kubernetes
+Lease. All JNI operations use one dedicated thread; shutdown drains an in-flight
+operation before closing the Ignite client. Do not fork after JVM startup.
+
+Credential mapping
+^^^^^^^^^^^^^^^^^^
+
+The current platform CRD has no credential Secret reference. For now, annotate a
+User with ``tak.opendefence.fi/credential-secret: <secret-name>``. The Secret must
+be in the operator namespace and contain exactly one of these keys:
+
+- ``password``: UTF-8 password for the TAK account.
+- ``tls.crt``: PEM X.509 certificate whose TAK-derived subject matches
+  ``spec.callsign``. Private keys are not required by the operator.
+
+``spec.publicKey`` remains the platform's field. A public key alone cannot be
+registered as a TAK X.509 certificate. The neighboring demo's placeholder keys
+therefore require an explicit credential Secret for this implementation. Missing
+credentials produce a waiting observation and create no TAK account. Secret
+changes trigger reconciliation; password rotation uses Secret UID/resourceVersion
+without storing password material or hashes in Kubernetes annotations.
+
+For example, after applying the neighboring project's demo objects, supply Bob's
+password from a local file and reference the Secret::
+
+    kubectl --context kind-rmk8soperator apply -f ../python-rasenmaeher-k8soperator/examples/demo.yaml
+    kubectl --context kind-rmk8soperator -n tak-operator-system create secret generic bob-tak \
+      --from-file=password=/path/to/password
+    kubectl --context kind-rmk8soperator annotate users.platform.opendefence.fi bob \
+      tak.opendefence.fi/credential-secret=bob-tak
+
+Only approved, non-revoked Users are provisioned. Revocation or removal of approval
+deletes an account owned by that User. ``spec.callsign`` becomes immutable once
+ownership is recorded. An already-existing unowned TAK account is a conflict;
+there is no automatic adoption. Deletion removes the owned account and verifies
+absence before releasing the finalizer. Set
+``tak.opendefence.fi/deletion-policy: Retain`` to retain it on CR deletion.
+
+Membership and observations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Each User owns the ordinary TAK membership edges it adds through ``spec.groupRefs``;
+the referenced Group's ``spec.name`` supplies the TAK group name. Removing a reference,
+or deleting its Group, removes those owned edges. Existing manual ordinary memberships,
+IN/OUT memberships, fingerprints, and server privileges survive membership changes.
+The JNI bridge supports full directional snapshots and replacement, but the current
+platform CRDs do not expose directional membership intent.
+
+TAK has no independently persisted empty group. Group objects describe routing names;
+their memberships are materialized by Users. Operational roles and platform role names
+are never mapped to ``ROLE_ADMIN`` or other file-auth privileges. Durable operational
+role assignment remains unsupported pending the separate discovery and live-client
+validation described in ``references/tak_operational_role_greenfield_reconciliation.md``.
+
+The platform controller retains ownership of ``status``. TAK publishes its result in
+``tak.opendefence.fi/observed`` and a durable write-ahead ownership record in
+``tak.opendefence.fi/ownership``. These contain no credential material. The operator
+persists ownership before external writes, rereads TAK after mutations, and retries
+from actual state after failures. A periodic pass repairs drift. Kubernetes resource
+version checks and leader election reduce races, but Ignite writes are not distributed
+transactions and cannot fence an external TAK administrator.
+
+Ignite connectivity
+^^^^^^^^^^^^^^^^^^^
+
+TAK Server can bind Ignite to its Pod IP. The server's generated
+``TAKIgniteConfig.xml`` sets ``igniteHost`` to the Downward API ``POD_IP``.
+Discovery listens on TCP 47500; the three server JVMs use communication ports
+47100-47102. A headless ``takserver`` Service exposes discovery for the operator
+in a separate Pod.
+
+The operator distinguishes the remote discovery seed (``TAK_IGNITE_HOST=takserver``)
+from its own local address (``TAK_IGNITE_BIND_ADDRESS`` set from its Pod IP). Its
+runtime generates its own TAKCL and Ignite XML; it needs no access to the server's
+persistent volume. It sets the ``IGNITE_WORK_DIR`` environment variable before
+starting Java; this Ignite version ignores the same-named JVM system property.
+The deployment also uses its writable runtime volume as the working directory,
+so the remaining filesystem can stay read-only. The TAKCL property
+``com.bbn.marti.takcl.igniteIpAddressOverride`` selects the remote discovery seed.
+Ignite communication is bidirectional between server and client Pod IPs; forwarding
+only 47500 to localhost is insufficient. Keep this internal control plane reachable
+only by trusted TAK and operator workloads. The included NetworkPolicy describes
+the permitted local workload traffic; enforcement depends on the cluster CNI.
+
+Validation
+^^^^^^^^^^
+
+Unit tests cover JNI conversion, ownership checkpoints, credential rotation,
+partial-write recovery, finalizers, dependency resolution, and cancellation.
+Local live checks used the shared kind cluster and the exact handoff JAR. They
+verified password and certificate lifecycle, ordinary/IN/OUT replacement,
+explicit server-role clearing, and idempotence from a separate JNI Pod. The
+deployed operator reconciled the neighboring Bob and Charlie examples, including
+group removal/restoration, password rotation, revocation/reactivation, and deletion
+of an isolated finalizer fixture. Those results were checked against persisted
+TAK state while preserving platform status. Durable operational roles require
+the separate client-facing validation described in the reference plan.

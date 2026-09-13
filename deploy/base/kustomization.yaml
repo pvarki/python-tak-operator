@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tak-operator-system
+resources:
+  - namespace.yaml
+  - database.yaml
+  - takserver.yaml
+  - network-policy.yaml
+configMapGenerator:
+  - name: tak-settings
+    literals:
+      - POSTGRES_ADDRESS=tak-database
+      - POSTGRES_DB=cot
+      - POSTGRES_USER=martiuser
+      - TAK_SERVER_ADDRESS=takserver.tak-operator-system.svc.cluster.local
+      - TAK_SERVER_NAME=TAK operator development
+      - COUNTRY=FI
+      - STATE=Uusimaa
+      - CITY=Helsinki
+      - ORGANIZATION=OpenDefence
+      - ORGANIZATIONAL_UNIT=Local development
+      - CA_NAME=TAK operator development CA
+      - ADMIN_CERT_NAME=admin
+      - TAK_HTTPS_KEYSTORE_FILENAME=/opt/tak/data/certs/files/takserver-https.jks
+      - LOGGING_JSON_ENABLED=true
+      - LOGGING_CONFIG=/opt/tak/logback-stdout.xml
+      - CONFIG_MAX_HEAP=256
+      - MESSAGING_MAX_HEAP=768
+      - API_MAX_HEAP=768
+      - JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2
+  - name: tak-ignite-template
+    files:
+      - TAKIgniteConfig.tpl
