@@ -27,7 +27,7 @@ async def test_version_cli() -> None:
 @pytest.mark.asyncio
 async def test_cli_output() -> None:
     """Run the entrypoint and check output"""
-    cmd = "takoperator"
+    cmd = "takoperator --help"
     process = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -37,4 +37,4 @@ async def test_cli_output() -> None:
     # Demand clean exit
     assert process.returncode == 0
     # Check output
-    assert ensure_str(out[0]).strip().endswith("Do your thing")
+    assert "Reconcile platform Users" in ensure_str(out[0])
