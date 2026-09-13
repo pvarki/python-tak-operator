@@ -17,7 +17,7 @@ Each command block offers Docker and Podman alternatives; run only the block
 for your chosen engine. Both engines use the same Temurin-based Dockerfile;
 the default ``Dockerfile`` points to ``Dockerfile_temurin``.
 
-Production uses ``eclipse-temurin:17-jre-noble`` with Ubuntu Noble's Python 3.12.
+Production uses ``eclipse-temurin:17-jre-resolute`` with Ubuntu Resolute's Python 3.14.
 Build, development, test and tox stages use the matching Temurin JDK, with Python
 headers and compilers available for native JNI extensions. ``JAVA_HOME`` points
 to ``/opt/java/openjdk``; the production JRE includes ``lib/server/libjvm.so``.
@@ -28,11 +28,11 @@ images. The bundled UserManager JAR provides the initial TAKServer classes for
 JNI integration; the rest of the TAKServer image is not copied. The
 ``TAKSERVER_IMAGE`` build argument selects a different compatible artifact image.
 
-Runtime wheels are built for Python 3.12 on Noble and installed offline into
+Runtime wheels are built for Python 3.14 on Resolute and installed offline into
 ``/opt/venv``. Build mounts keep uv and the wheel archives out of the final image;
 the JDK, Python headers and compilers stay in the build stages. This follows
 `python-tak-rmapi PR 154 <https://github.com/pvarki/python-tak-rmapi/pull/154>`_.
-The ``JAVA_RUNTIME_IMAGE`` build argument accepts a compatible Noble Java runtime
+The ``JAVA_RUNTIME_IMAGE`` build argument accepts a compatible Resolute Java runtime
 for comparison builds; keep its Java major version aligned with ``TEMURIN_VERSION``
 (17 by default) and its Python ABI aligned with the builder.
 
@@ -154,6 +154,12 @@ Commit uv.lock; Docker builds use uv sync --locked to detect stale dependency me
 Development
 -----------
 
+Python 3.14 or newer is required. Cloudcoil is sourced from Git tag ``0.8.0``
+through ``tool.uv.sources`` in pyproject.toml; uv.lock records the resolved commit.
+The tag's package metadata reports ``0.5.0dev0``, so the Git source determines
+the version used here. See the
+`Cloudcoil 0.8.0 guides <https://github.com/cloudcoil/cloudcoil/tree/0.8.0#choose-a-guide>`_.
+
 TLDR:
 
 - Install uv: https://docs.astral.sh/uv/getting-started/installation/
@@ -208,7 +214,7 @@ GitHub Actions uses the shared actions in
 The workflows in .github/workflows cover:
 
 - Pull requests: version increment and project metadata checks, prek, pytest
-  and package builds on Python 3.12, 3.13 and 3.14, JUnit artifacts, and Temurin
+  and package builds on Python 3.14, JUnit artifacts, and Temurin
   container builds.
 - Pull requests from this repository: Snyk testing and image publishing after
   the version, metadata, prek, test and container build checks pass. Fork pull
