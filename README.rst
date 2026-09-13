@@ -200,10 +200,26 @@ empty credentials makes the shared publisher fail.
 Local TAK operator
 ------------------
 
-The operator consumes the existing cluster-scoped ``User``, ``Group``, and
-``Role`` resources in ``platform.opendefence.fi/v1alpha1``. Install their CRDs
-and platform controller from ``../python-rasenmaeher-k8soperator`` first. This
-repository does not install or change those CRDs.
+The operator consumes the cluster-scoped ``User``, ``Group``, and ``Role`` resources
+in ``platform.opendefence.fi/v1alpha1``. Their CRDs and platform controller belong
+to ``../python-rasenmaeher-k8soperator``.
+
+With the sibling repository's mise tools available on PATH, start the complete
+local environment with::
+
+    task up
+
+This ensures the sibling's registry, cluster, and platform are ready before
+starting TAK and deploying this operator. An existing local image is republished;
+a missing image is built first. It reuses a Tilt session belonging to that sibling
+checkout. Otherwise it runs the sibling's
+``task up`` in the background, with logs in ``.task/platform-up.log``. Since Tilt
+stays running, readiness of its platform resource determines completion.
+``task platform:up`` performs only that prerequisite step. ``TILT_PORT`` selects
+the sibling Tilt port (default 10350); ``PLATFORM_START_TIMEOUT`` controls its
+startup wait in seconds (default 600). Stop Tilt using the sibling's
+``task tilt:stop`` or manage the whole sibling environment with its existing tasks.
+Demo resources retain their manual Tilt trigger.
 
 The local Kustomize deployment uses the shared ``kind-rmk8soperator`` cluster
 and isolates TAK, PostGIS, credentials, and storage in ``tak-operator-system``.
@@ -212,17 +228,23 @@ following ``../docker-rasenmaeher-integration/takserver``. Credentials are gener
 locally as Kubernetes Secrets; they are not committed. Existing Secrets are reused.
 The deployment pins the TAK 5.8.69 image and digest validated by the JNI handoff.
 
-Start TAK with ``task tak:up`` and inspect it with ``task tak:status``. If the
-shared cluster is absent, run ``task cluster:up`` first. This delegates cluster
+For individual steps, start TAK with ``task tak:up`` and inspect it with
+``task tak:status``. If the shared cluster is absent, run ``task cluster:up``
+first. This delegates cluster
 creation to the neighboring project. ``task tak:forward`` exposes HTTPS 8443 and
 CoT TLS 8089 on the workstation. Removing a Deployment leaves its persistent
 volumes intact; no cluster reset is required.
 
-Build and start the operator with::
+Start the operator with::
 
-    task operator:build
     task operator:up
     task operator:logs
+
+``operator:up`` republishes the locally cached image before applying the
+Deployment, building it first if no local image exists. This restores the image
+when the local registry has been recreated. After changing operator code or its
+Dockerfile, use ``task operator:build`` to rebuild and publish, followed by
+``task operator:up`` to deploy that image.
 
 The build requires Docker Buildx; on the local macOS setup it uses Podman's Docker
 API. The push task selects Podman or Docker using the neighboring project's runtime

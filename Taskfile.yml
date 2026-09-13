@@ -3,6 +3,7 @@ version: "3"
 vars:
   CONTEXT: kind-rmk8soperator
   NAMESPACE: tak-operator-system
+  TILT_PORT: '{{env "TILT_PORT" | default "10350"}}'
   RUNTIME:
     sh: |
       {{if env "KIND_EXPERIMENTAL_PROVIDER"}}
@@ -18,6 +19,20 @@ tasks:
     desc: List local development tasks
     cmd: task --list
     silent: true
+
+  up:
+    desc: Start the sibling platform, TAK server, and TAK operator
+    aliases: [u]
+    cmds:
+      - task: platform:up
+      - task: tak:up
+      - task: operator:up
+
+  platform:up:
+    desc: Start or reuse the sibling's up task and wait for platform readiness
+    env:
+      KIND_EXPERIMENTAL_PROVIDER: '{{.RUNTIME}}'
+    cmd: bash deploy/scripts/ensure-platform.sh ../python-rasenmaeher-k8soperator {{.TILT_PORT | shellQuote}}
 
   cluster:up:
     desc: Start or reuse the neighboring project's shared kind cluster
@@ -53,8 +68,19 @@ tasks:
   operator:build:
     desc: Build the production operator and publish it to the shared local registry
     cmds:
-      - docker buildx build --load --target production -t localhost:5005/takoperator:local .
+      - task: operator:build-image
       - task: operator:push
+
+  operator:build-image:
+    internal: true
+    cmd: docker buildx build --load --target production -t localhost:5005/takoperator:local .
+
+  operator:ensure-image:
+    internal: true
+    status:
+      - '{{.RUNTIME}} image inspect localhost:5005/takoperator:local > /dev/null 2>&1'
+    cmds:
+      - task: operator:build-image
 
   operator:push:
     desc: Publish the built operator to the shared local registry
@@ -67,10 +93,12 @@ tasks:
       localhost:5005/takoperator:local
 
   operator:up:
-    desc: Deploy the locally built operator alongside the running TAK server
+    desc: Ensure the local image is published and deploy the operator
     preconditions:
       - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/takserver
     cmds:
+      - task: operator:ensure-image
+      - task: operator:push
       - kubectl --context {{.CONTEXT}} apply -k deploy/operator
       - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout restart deployment/tak-operator
       - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/tak-operator --timeout=300s

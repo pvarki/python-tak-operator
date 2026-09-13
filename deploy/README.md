@@ -1,16 +1,28 @@
 # Local TAK development cluster
 
-Use the existing `kind-rmk8soperator` cluster from the neighboring
-`python-rasenmaeher-k8soperator` checkout. `task cluster:up` starts or reuses it;
-it does not reset it. The platform operator in that cluster owns the
-`platform.opendefence.fi/v1alpha1` CRDs consumed by this operator.
+With the neighboring `python-rasenmaeher-k8soperator` checkout and its mise tools
+available on PATH, run `task up` to start the complete environment. It ensures
+the sibling's `up` workflow is ready, then runs `tak:up` and `operator:up` in order.
+The shared cluster is `kind-rmk8soperator`; the sibling platform operator owns the
+`platform.opendefence.fi/v1alpha1` CRDs consumed here.
+
+`task platform:up` reuses a Tilt session belonging to that sibling checkout, or
+starts the sibling's foreground `task up` in the background and logs to
+`.task/platform-up.log`. It waits for the platform's Tilt readiness, established
+CRDs, and available Deployment. A session from another checkout on the selected
+port is rejected. `TILT_PORT` defaults to 10350 and `PLATFORM_START_TIMEOUT` to
+600 seconds. Use the sibling's `task tilt:stop` to stop that background session;
+its cluster lifecycle commands remain authoritative. Demo resources still use
+their manual Tilt trigger.
+
+Individual tasks remain available:
 
 ```sh
+task platform:up
 task tak:render
 task tak:up
 task tak:status
 task tak:logs
-task operator:build
 task operator:up
 task operator:logs
 ```
@@ -43,8 +55,14 @@ The PostGIS image supports the shared cluster's ARM64 node. Local-path PVCs
 retain data across Pod restarts. Resource and Ignite cache sizes are deliberately
 bounded for the shared development VM.
 
-The operator is a separate Kustomize bundle in `deploy/operator`. Build and
-push its production image to the shared **local** registry before applying it:
+The operator is a separate Kustomize bundle in `deploy/operator`.
+`task operator:up` ensures a local image exists, pushes it to the shared **local**
+registry, then applies and restarts the Deployment. It builds only when the local
+image is missing. This sequence also works when the registry has been recreated
+and its previous images are gone. After changing code or the Dockerfile, use
+`task operator:build` to rebuild and publish, then `task operator:up` to deploy.
+
+To rebuild and deploy without Task:
 
 ```sh
 docker buildx build --load --target production -t localhost:5005/takoperator:local .
@@ -53,11 +71,13 @@ podman push --tls-verify=false localhost:5005/takoperator:local
 # With Docker Engine, use: docker push localhost:5005/takoperator:local
 kubectl --context kind-rmk8soperator apply -k deploy/operator
 kubectl --context kind-rmk8soperator -n tak-operator-system \
+  rollout restart deployment/tak-operator
+kubectl --context kind-rmk8soperator -n tak-operator-system \
   rollout status deployment/tak-operator --timeout=300s
 ```
 
-After rebuilding an existing `:local` tag, restart only the operator Deployment
-to pull the new image. `task operator:up` does this automatically. The operator
+Restarting the operator Deployment makes it pull the updated `:local` tag. A
+build or push failure stops `operator:up` before it changes the Deployment. The operator
 runs as a non-root user, stores its JVM runtime files in an `emptyDir`, and
 uses a namespace-local `takoperator` Lease for leader election. Its RBAC reads
 and patches platform resources, reads local credential Secrets, and updates
