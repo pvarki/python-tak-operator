@@ -19,7 +19,7 @@ class UserSpec(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     callsign: str = Field(min_length=1)
-    public_key: str = Field(alias="publicKey")
+    public_key: str | None = Field(default=None, alias="publicKey")
     revoked_at: datetime | None = Field(default=None, alias="revokedAt")
     approved_at: datetime | None = Field(default=None, alias="approvedAt")
     group_refs: list[ObjectRef] = Field(default_factory=list, alias="groupRefs")

@@ -39,7 +39,6 @@ def user_resource(**changes: Any) -> User:
     """A real platform resource shape, including foreign fields and status."""
     spec = {
         "callsign": "alpha",
-        "publicKey": "platform-key",
         "approvedAt": datetime(2026, 9, 1, tzinfo=timezone.utc),
         "approvalCode": "platform-owned",
         **changes,
@@ -108,6 +107,13 @@ def test_consumed_models_and_manifests_preserve_platform_ownership() -> None:
     assert app.leader_election is not None
     rules = [rule for obj in manifests for rule in obj.get("rules", [])]
     assert not any(resource.endswith("/status") for rule in rules for resource in rule.get("resources", []))
+
+
+@pytest.mark.parametrize("fields", [{}, {"publicKey": None}, {"publicKey": "legacy-platform-key"}])
+def test_users_accept_optional_public_key(fields: dict[str, str | None]) -> None:
+    user = User.model_validate({"spec": {"callsign": "alice", "approvalCode": "platform-owned", **fields}})
+    assert user.spec.public_key == fields.get("publicKey")
+    assert user.spec.model_dump(by_alias=True)["approvalCode"] == "platform-owned"
     assert {model.gvk().kind for model in (User, Group, Role)} == {"User", "Group", "Role"}
 
 
