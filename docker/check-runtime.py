@@ -1,4 +1,4 @@
-"""Smoke-test the production container with only the Python standard library."""
+"""Smoke-test the production container and its runtime dependencies."""
 
 import ctypes
 import importlib.util
@@ -29,8 +29,10 @@ class JavaVMInitArgs(ctypes.Structure):
 
 def main() -> None:
     """Check the runtime ABI, TAK artifacts, embedded JVM, and build-tool removal."""
-    assert sys.version_info[:2] == (3, 12), sys.version
+    assert sys.version_info[:2] == (3, 14), sys.version
     assert sys.prefix == "/opt/venv", sys.prefix
+    for module_name in ("cloudcoil.application", "cloudcoil.models.kubernetes.core.v1", "uvicorn"):
+        importlib.import_module(module_name)
     java_home = Path(os.environ["JAVA_HOME"])
     tak_jar = Path("/opt/tak/utils/UserManager.jar")
     with zipfile.ZipFile(tak_jar) as archive:
@@ -61,7 +63,7 @@ def main() -> None:
     assert not (java_home / "include/jni.h").exists()
     assert importlib.util.find_spec("pip") is None
     assert not (Path(tempfile.gettempdir()) / "wheelhouse").exists()
-    print("Python 3.12, TAKServer artifacts, JNI JVM startup, and runtime cleanup passed.")
+    print("Python 3.14, Cloudcoil, TAKServer artifacts, JNI JVM startup, and runtime cleanup passed.")
 
 
 if __name__ == "__main__":
