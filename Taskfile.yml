@@ -23,16 +23,19 @@ tasks:
   up:
     desc: Start the sibling platform, TAK server, and TAK operator
     aliases: [u]
-    cmds:
-      - task: platform:up
-      - task: tak:up
-      - task: operator:up
+    cmd: >-
+      bash deploy/scripts/with-platform-tools.sh ../python-rasenmaeher-k8soperator
+      task platform:up tak:up operator:up
+      CONTEXT={{.CONTEXT | shellQuote}} NAMESPACE={{.NAMESPACE | shellQuote}}
+      TILT_PORT={{.TILT_PORT | shellQuote}} RUNTIME={{.RUNTIME | shellQuote}}
 
   platform:up:
     desc: Start or reuse the sibling's up task and wait for platform readiness
     env:
       KIND_EXPERIMENTAL_PROVIDER: '{{.RUNTIME}}'
-    cmd: bash deploy/scripts/ensure-platform.sh ../python-rasenmaeher-k8soperator {{.TILT_PORT | shellQuote}}
+    cmd: >-
+      bash deploy/scripts/with-platform-tools.sh ../python-rasenmaeher-k8soperator
+      bash deploy/scripts/ensure-platform.sh ../python-rasenmaeher-k8soperator {{.TILT_PORT | shellQuote}}
 
   cluster:up:
     desc: Start or reuse the neighboring project's shared kind cluster

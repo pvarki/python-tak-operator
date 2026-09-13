@@ -204,10 +204,14 @@ The operator consumes the cluster-scoped ``User``, ``Group``, and ``Role`` resou
 in ``platform.opendefence.fi/v1alpha1``. Their CRDs and platform controller belong
 to ``../python-rasenmaeher-k8soperator``.
 
-With the sibling repository's mise tools available on PATH, start the complete
-local environment with::
+With Task and the sibling checkout available, start the complete local
+environment with::
 
     task up
+
+When mise is installed, ``up`` and ``platform:up`` resolve the sibling's tools
+from its ``mise.toml`` automatically. No global Tilt version or prior shell
+activation is needed. Without mise, install the required tools on PATH.
 
 This ensures the sibling's registry, cluster, and platform are ready before
 installing CloudNativePG, waiting for its database Cluster, starting TAK and

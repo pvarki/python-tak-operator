@@ -1,10 +1,15 @@
 # Local TAK development cluster
 
-With the neighboring `python-rasenmaeher-k8soperator` checkout and its mise tools
-available on PATH, run `task up` to start the complete environment. It ensures
+With Task and the neighboring `python-rasenmaeher-k8soperator` checkout available,
+run `task up` to start the complete environment. It ensures
 the sibling's `up` workflow is ready, then runs `tak:up` and `operator:up` in order.
 The shared cluster is `kind-rmk8soperator`; the sibling platform operator owns the
 `platform.opendefence.fi/v1alpha1` CRDs consumed here.
+
+`up` and `platform:up` automatically resolve the sibling's tools through its
+`mise.toml` when mise is installed. This also works with unconfigured mise shims
+on PATH; global tool versions and prior shell activation are unnecessary.
+Without mise, the required tools must already be on PATH.
 
 `task platform:up` reuses a Tilt session belonging to that sibling checkout, or
 starts the sibling's foreground `task up` in the background and logs to
