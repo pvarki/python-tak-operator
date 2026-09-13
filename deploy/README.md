@@ -52,9 +52,12 @@ files depend on their contents.
 The TAK image is pinned to the exact digest validated in the JNI handoff.
 Its standalone initialization script prepares the database schema and certificates.
 Configuration, messaging and API run as separate containers in one Pod, sharing
-`/opt/tak/data` and a network namespace, matching the integration project's
-Compose topology. Retention and plugin services are not needed for file-auth
-reconciliation and are omitted from this development deployment. Recreate
+`/opt/tak/data` and a network namespace, retaining the original integration
+topology. [TAK PR #136](https://github.com/pvarki/docker-atak-server/pull/136)
+enables separately networked services; the
+[sidecar-removal review](../references/TAK_SIDECAR_REMOVAL_REVIEW.md) records the
+remaining Kubernetes migration. Retention and plugin services are not needed for
+file-auth reconciliation and are omitted from this development deployment. Recreate
 deployment strategy prevents two configuration services from writing the same
 volume during an update.
 

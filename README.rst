@@ -333,6 +333,11 @@ transactions and cannot fence an external TAK administrator.
 Ignite connectivity
 ^^^^^^^^^^^^^^^^^^^
 
+The operator is already in a separate Pod. TAK's config, messaging and API still
+share one Pod here; upstream PR #136 does not change these manifests. See the
+`sidecar-removal review <references/TAK_SIDECAR_REMOVAL_REVIEW.md>`_ for the
+remaining image, discovery, storage and rollout changes.
+
 TAK Server can bind Ignite to its Pod IP. The server's generated
 ``TAKIgniteConfig.xml`` sets ``igniteHost`` to the Downward API ``POD_IP``.
 Discovery listens on TCP 47500; the three server JVMs use communication ports
