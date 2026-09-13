@@ -99,6 +99,7 @@ class TakJvmSettings:
             {
                 "xmlns": "http://bbn.com/marti/xml/config",
                 "igniteHost": self.bind_address,
+                "igniteMulticast": "false",
                 "cacheOffHeapInitialSizeBytes": "16777216",
                 "cacheOffHeapMaxSizeBytes": "67108864",
                 "ignitePoolSize": "2",

@@ -38,7 +38,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: TAK_IGNITE_HOST
-              value: takserver
+              value: tak-ignite
             - name: TAK_IGNITE_BIND_ADDRESS
               valueFrom:
                 fieldRef:

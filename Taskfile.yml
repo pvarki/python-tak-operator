@@ -76,20 +76,35 @@ tasks:
       - kubectl --context {{.CONTEXT}} get nodes
     cmds:
       - task: database:up
-      - kubectl --context {{.CONTEXT}} apply -k deploy/overlays/local
-      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} rollout status deployment/takserver --timeout=600s
+      - bash deploy/scripts/deploy-tak.sh {{.CONTEXT | shellQuote}} {{.NAMESPACE | shellQuote}}
 
   tak:status:
     desc: Show local TAK workloads and persistent storage
     cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get clusters.postgresql.cnpg.io,pods,services,pvc
 
+  tak:restart:
+    desc: Restart the TAK grid together and reconnect the operator
+    cmds:
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} scale deployment/tak-config deployment/tak-messaging deployment/tak-api --replicas=0
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} wait --for=delete pod -l app.kubernetes.io/name=takserver --timeout=180s
+      - task: tak:up
+      - task: operator:up
+
   tak:logs:
     desc: Follow TAK messaging logs
-    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/takserver -c messaging --follow
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} logs deployment/tak-messaging --follow
 
   tak:forward:
     desc: Forward the local TAK HTTPS and CoT ports to this workstation
-    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/takserver 8443:8443 8089:8089
+    deps: [tak:forward:https, tak:forward:cot]
+
+  tak:forward:https:
+    desc: Forward TAK HTTPS to localhost:8443
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/takserver 8443:8443
+
+  tak:forward:cot:
+    desc: Forward TAK CoT TLS to localhost:8089
+    cmd: kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} port-forward service/tak-messaging 8089:8089
 
   operator:build:
     desc: Build the production operator and publish it to the shared local registry
@@ -121,7 +136,7 @@ tasks:
   operator:up:
     desc: Ensure the local image is published and deploy the operator
     preconditions:
-      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/takserver
+      - kubectl --context {{.CONTEXT}} -n {{.NAMESPACE}} get deployment/tak-config deployment/tak-messaging deployment/tak-api
     cmds:
       - task: operator:ensure-image
       - task: operator:push

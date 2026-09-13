@@ -229,13 +229,19 @@ Demo resources retain their manual Tilt trigger.
 The local Kustomize deployment uses the shared ``kind-rmk8soperator`` cluster
 and isolates TAK, its CNPG PostgreSQL/PostGIS Cluster, credentials, and storage in
 ``tak-operator-system``. CNPG itself runs in ``cnpg-system``.
-The TAK configuration, messaging, and API containers share a Pod and data volume,
-following ``../docker-rasenmaeher-integration/takserver``. Credentials are generated
+TAK configuration, messaging, and API run in separate Pods, following the process
+separation in ``../docker-rasenmaeher-integration/takserver``. They share the
+``tak-data`` volume; required Pod affinity keeps messaging and API on the config
+Pod's node for ReadWriteOnce storage. Credentials are generated
 locally as Kubernetes Secrets; they are not committed. Existing Secrets are reused.
-The deployment pins the TAK 5.8.69 image and digest validated by the JNI handoff.
+The server and operator JAR source pin the TAK 5.8.69 PR #136 image digest.
 
 ``task cnpg:up`` installs the pinned database operator; ``task database:up`` also
 creates and waits for the local database. ``tak:up`` includes both steps.
+It validates the manifests, removes the previous ``takserver`` Deployment if
+present, and starts all three TAK Deployments before waiting for readiness.
+This cutover preserves Secrets, database and TAK PVCs; the old config process
+must release its shared-file lock before its replacement starts.
 The local database has one instance and a 2 GiB PVC; the database base defines
 three instances. TAK uses CNPG's ``tak-database-rw`` service and the
 ``tak-database-app`` credential Secret as a non-superuser. See
@@ -247,8 +253,15 @@ For individual steps, start TAK with ``task tak:up`` and inspect it with
 ``task tak:status``. If the shared cluster is absent, run ``task cluster:up``
 first. This delegates cluster
 creation to the neighboring project. ``task tak:forward`` exposes HTTPS 8443 and
-CoT TLS 8089 on the workstation. Removing a Deployment leaves its persistent
+CoT TLS 8089 on the workstation using two concurrent Service forwards.
+``task tak:forward:https`` and ``task tak:forward:cot`` run them individually.
+Removing a Deployment leaves its persistent
 volumes intact; no cluster reset is required.
+
+Use ``task tak:restart`` to restart the TAK grid and reconnect the operator.
+Replacing messaging alone can stall the existing upstream Ignite clients while
+their listener probes remain ready. The coordinated restart is the tested
+recovery path; separate Pods do not yet provide transparent messaging failover.
 
 Start the operator with::
 
@@ -283,9 +296,9 @@ be in the operator namespace and contain exactly one of these keys:
 - ``tls.crt``: PEM X.509 certificate whose TAK-derived subject matches
   ``spec.callsign``. Private keys are not required by the operator.
 
-``spec.publicKey`` remains the platform's field. A public key alone cannot be
-registered as a TAK X.509 certificate. The neighboring demo's placeholder keys
-therefore require an explicit credential Secret for this implementation. Missing
+Users can omit the legacy ``spec.publicKey`` field. A public key alone cannot be
+registered as a TAK X.509 certificate. The neighboring demo users require an
+explicit credential Secret for this implementation. Missing
 credentials produce a waiting observation and create no TAK account. Secret
 changes trigger reconciliation; password rotation uses Secret UID/resourceVersion
 without storing password material or hashes in Kubernetes annotations.
@@ -333,18 +346,15 @@ transactions and cannot fence an external TAK administrator.
 Ignite connectivity
 ^^^^^^^^^^^^^^^^^^^
 
-The operator is already in a separate Pod. TAK's config, messaging and API still
-share one Pod here; upstream PR #136 does not change these manifests. See the
-`sidecar-removal review <references/TAK_SIDECAR_REMOVAL_REVIEW.md>`_ for the
-remaining image, discovery, storage and rollout changes.
+Each TAK process binds Ignite to its own Pod IP through
+``TAK_IGNITE_BIND_ADDRESS``. The image renders private per-process XML and
+runtime files in an ``emptyDir``. Messaging is the Ignite server; config, API
+and this operator join as clients. The headless ``tak-ignite`` Service publishes
+messaging's TCP 47500 endpoint before readiness, allowing the grid to bootstrap.
+Each server process uses TCP 47100 on its own Pod IP for communication.
+``takserver`` selects API for HTTPS; ``tak-messaging`` selects messaging for CoT.
 
-TAK Server can bind Ignite to its Pod IP. The server's generated
-``TAKIgniteConfig.xml`` sets ``igniteHost`` to the Downward API ``POD_IP``.
-Discovery listens on TCP 47500; the three server JVMs use communication ports
-47100-47102. A headless ``takserver`` Service exposes discovery for the operator
-in a separate Pod.
-
-The operator distinguishes the remote discovery seed (``TAK_IGNITE_HOST=takserver``)
+The operator distinguishes the remote discovery seed (``TAK_IGNITE_HOST=tak-ignite``)
 from its own local address (``TAK_IGNITE_BIND_ADDRESS`` set from its Pod IP). Its
 runtime generates its own TAKCL and Ignite XML; it needs no access to the server's
 persistent volume. It sets the ``IGNITE_WORK_DIR`` environment variable before
@@ -356,12 +366,17 @@ Ignite communication is bidirectional between server and client Pod IPs; forward
 only 47500 to localhost is insufficient. Keep this internal control plane reachable
 only by trusted TAK and operator workloads. The included NetworkPolicy describes
 the permitted local workload traffic; enforcement depends on the cluster CNI.
+See `deployment details <deploy/README.md>`_ for storage placement and startup
+requirements, and the `original review <references/TAK_SIDECAR_REMOVAL_REVIEW.md>`_
+for the PR #136 migration rationale.
 
 Validation
 ^^^^^^^^^^
 
 Unit tests cover JNI conversion, ownership checkpoints, credential rotation,
 partial-write recovery, finalizers, dependency resolution, and cancellation.
+See `split-Pod validation <references/TAK_SPLIT_POD_VALIDATION.md>`_ for PR #136
+deployment, transport, persistence and recovery checks on the local cluster.
 Local live checks used the shared kind cluster and the exact handoff JAR. They
 verified password and certificate lifecycle, ordinary/IN/OUT replacement,
 explicit server-role clearing, and idempotence from a separate JNI Pod. The

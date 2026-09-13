@@ -37,9 +37,7 @@ For CNPG installation, database readiness, and commands without Task, see
 [database setup](database/README.md). Once CNPG and its database are ready:
 
 ```sh
-kubectl --context kind-rmk8soperator apply -k deploy/overlays/local
-kubectl --context kind-rmk8soperator -n tak-operator-system \
-  rollout status deployment/takserver --timeout=600s
+bash deploy/scripts/deploy-tak.sh kind-rmk8soperator tak-operator-system
 ```
 
 TAK and its CNPG Cluster live in `tak-operator-system`; the CNPG operator runs in
@@ -49,17 +47,43 @@ preserving existing values on subsequent runs. Credentials are never committed.
 Keep both Secrets together with the TAK and CNPG PVCs: certificates and database
 files depend on their contents.
 
-The TAK image is pinned to the exact digest validated in the JNI handoff.
-Its standalone initialization script prepares the database schema and certificates.
-Configuration, messaging and API run as separate containers in one Pod, sharing
-`/opt/tak/data` and a network namespace, retaining the original integration
-topology. [TAK PR #136](https://github.com/pvarki/docker-atak-server/pull/136)
-enables separately networked services; the
-[sidecar-removal review](../references/TAK_SIDECAR_REMOVAL_REVIEW.md) records the
-remaining Kubernetes migration. Retention and plugin services are not needed for
-file-auth reconciliation and are omitted from this development deployment. Recreate
-deployment strategy prevents two configuration services from writing the same
-volume during an update.
+The TAK image and operator JAR source pin the same multi-architecture PR #136
+digest. Configuration, messaging and API each run in a separate Deployment and
+Pod, using the image's native startup support. Config's init container alone
+initializes the database schema and certificates. All roles start together:
+config needs messaging's Ignite server, while messaging waits for config's
+shared-file generation marker. Startup and readiness probes run the image's
+profile-specific health check inside each Pod. Retention and plugin manager
+remain omitted from this development deployment.
+
+`tak:up` server-validates the overlay before retiring the legacy `takserver`
+Deployment with foreground deletion. This waits for its config JVM to release
+the shared-file lock and prevents overlapping Deployment selectors. It then
+applies all three roles before waiting for their rollouts. Subsequent runs reuse
+the split Deployments. Use this task or its helper for the first migration;
+plain `kubectl apply` would leave the old Deployment running. Recreate strategy
+keeps each role at one instance through updates.
+
+Use `task tak:restart` when restarting the Ignite grid. It stops all TAK
+Pods before bringing the roles up together, waits for readiness, and reconnects
+the operator. This prevents a new client from attaching to the retiring grid. During local
+testing, replacing messaging alone left the existing config/API Ignite clients
+stalled even though their listeners remained open. The image's health check
+checks local listeners and shared-file ownership, so it does not detect that
+JVM reconnect failure. Separate Pods do not yet provide transparent messaging
+failover; independent messaging replacement requires this coordinated recovery.
+See [split-Pod validation](../references/TAK_SPLIT_POD_VALIDATION.md) for the live
+checks and the observed Ignite reconnect failure.
+
+The roles still share `/opt/tak/data` for certificates, CoreConfig and file-auth
+state. Required Pod affinity places messaging and API on the config Pod's node,
+allowing them to share the existing ReadWriteOnce PVC. This is process isolation,
+not multi-node availability: production placement across nodes needs shared
+storage with verified file-lock semantics or a change to state distribution.
+Each Pod has its own runtime `emptyDir` for Ignite XML, work files and outbound
+Java truststore. Preserve `tak-data`, the CNPG PVCs and both credential Secrets
+during migration. The [original review](../references/TAK_SIDECAR_REMOVAL_REVIEW.md)
+records the upstream constraints behind this layout.
 
 CNPG manages the PostgreSQL Pods, storage and primary Service `tak-database-rw`.
 The pinned PostGIS image supports the shared cluster's ARM64 node. CNPG initializes
@@ -112,28 +136,34 @@ TLS verification only for this local Podman registry push.
 
 ## Ignite connectivity
 
-TAK 5.8.69 accepts `igniteHost` in `TAKIgniteConfig.xml`; it sets the local Ignite
-bind address and TCP communication address. The mounted template renders the
-TAK Pod IP from the downward API. A headless `takserver` Service exposes that
-address directly, so Ignite can discover and advertise its real ports without
-Service port translation.
+Each TAK Pod sets `TAK_IGNITE_BIND_ADDRESS` from its own downward-API Pod IP.
+The image renders `igniteHost` in private XML, with `TAK_IGNITE_SEEDS=tak-ignite:47500`.
+The messaging-only headless `tak-ignite` Service uses `publishNotReadyAddresses`
+so bootstrap does not depend on an already-ready Ignite grid. Config and API
+are Ignite clients; messaging is its sole server. The old mounted Ignite
+template is removed. Keep the new server renderer's default finder: it uses
+`igniteMulticast=true` to retain the explicit discovery seeds, whereas TAK's
+server-side unicast finder overwrites them with the local bind address.
 
 The operator runs in its own Pod. Its bridge writes a separate Ignite config
-bound to `TAK_IGNITE_BIND_ADDRESS` (its Pod IP) and uses `TAK_IGNITE_HOST=takserver`
+bound to `TAK_IGNITE_BIND_ADDRESS` (its Pod IP) and uses `TAK_IGNITE_HOST=tak-ignite`
 as the discovery seed. The bridge supplies TAKCL's
 `com.bbn.marti.takcl.igniteIpAddressOverride` system property so discovery and
-local binding are independent. Ignite uses discovery ports 47500–47510 and
-communication ports 47100–47110 on the TAK Pod. The operator retains Ignite's
+local binding are independent. Its TAKCL XML explicitly keeps `igniteMulticast=false`;
+the server XML must not be copied into this client. Messaging listens on discovery
+port 47500; each TAK Pod uses communication port 47100. The operator retains Ignite's
 default local port ranges, 47500–47600 and 47100–47200. It is a Java cluster client,
 not an HTTP service or Ignite thin client on port 10800.
 
 NetworkPolicies restrict database and Ignite ingress to their consumers. The
 default kind networking does not enforce NetworkPolicy; use a policy-capable
 CNI when isolation is required. Ignite TLS is disabled for this local cluster.
-No Ignite ports are published to the host. `task tak:forward` forwards only
-the HTTPS and CoT client ports.
+No Ignite ports are published to the host. `takserver` remains the API's HTTPS
+Service, preserving the existing certificate hostname. `tak-messaging` serves
+CoT. `task tak:forward` runs both Service forwards concurrently; the
+`tak:forward:https` and `tak:forward:cot` tasks run them individually.
 
 These resources do not install or change the platform CRDs. The neighboring
-project's `examples/demo.yaml` contains illustrative public keys, which are not
-valid X.509 certificates. Operator reconciliation tests must supply actual test
-credentials using the operator's documented credential mechanism.
+project's `examples/demo.yaml` omits TAK credentials. Operator reconciliation
+tests must supply actual test credentials using the operator's documented
+credential Secret mechanism; the legacy `spec.publicKey` field is optional.

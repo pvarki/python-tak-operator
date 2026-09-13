@@ -164,15 +164,16 @@ def test_store_rejects_fork(facade: tuple[JniFileAuthStore, MagicMock, dict[str,
 
 def test_runtime_config_separates_discovery_from_local_bind(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setenv("TAK_RUNTIME_DIR", str(tmp_path))
-    monkeypatch.setenv("TAK_IGNITE_HOST", "takserver")
+    monkeypatch.setenv("TAK_IGNITE_HOST", "tak-ignite")
     monkeypatch.setenv("TAK_IGNITE_BIND_ADDRESS", "10.1.0.99")
     settings = TakJvmSettings.from_env()
     config = settings.write_configuration()
     assert config.read_bytes().startswith(b"<?xml")
     ignite = (tmp_path / "data/TAKIgniteConfig.xml").read_text()
     assert 'igniteHost="10.1.0.99"' in ignite
-    assert "takserver" not in ignite
-    assert "-Dcom.bbn.marti.takcl.igniteIpAddressOverride=takserver" in settings.options(config)
+    assert 'igniteMulticast="false"' in ignite
+    assert "tak-ignite" not in ignite
+    assert "-Dcom.bbn.marti.takcl.igniteIpAddressOverride=tak-ignite" in settings.options(config)
     assert (tmp_path / "temporary").is_dir()
     assert (tmp_path / "fallback").is_dir()
 

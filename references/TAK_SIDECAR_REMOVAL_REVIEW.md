@@ -1,4 +1,11 @@
-# Remaining Kubernetes work after TAK PR #136
+# TAK PR #136 migration review
+
+Historical review before implementation. The process split is now implemented;
+see [current deployment instructions](../deploy/README.md) for the active layout.
+The [split-Pod validation](TAK_SPLIT_POD_VALIDATION.md) records tested behavior
+and the messaging-replacement limitation found during implementation.
+The findings below describe the original shared-Pod baseline and its migration
+requirements, including the remaining production storage/CNI validation.
 
 Reviewed 2026-09-13 against [docker-atak-server PR #136](https://github.com/pvarki/docker-atak-server/pull/136),
 head `025355ba9f76bf6c41187897f4a5fcac93b82afb`, and this repository at `2d267fe`.
@@ -40,7 +47,8 @@ is specifically for the optional TAK plugin-manager service.
    Deployments. Keep initialization under one owner, for example the config
    Deployment's init container. Retention and plugin manager are currently omitted
    here and can remain outside this migration.
-2. Remove the mounted [old Ignite template](../deploy/base/TAKIgniteConfig.tpl)
+2. Remove the mounted old Ignite template (`deploy/base/TAKIgniteConfig.tpl`
+   at baseline commit `2d267fe`)
    and its ConfigMap. Use the new image's per-profile renderer. Set
    `TAK_IGNITE_BIND_ADDRESS` from each Pod's IP and `TAK_IGNITE_SEEDS` to the
    messaging discovery address. The PR's default `takmsg-ignite:47500` is a
@@ -113,7 +121,7 @@ reimporting the database.
   production CNI/storage. Neither the PR's Compose results nor our one-node kind
   environment demonstrates cross-node storage behavior.
 
-This review compared PR source and CI results, inspected the published image
+The original review compared PR source and CI results, inspected the published image
 index, and rendered the existing local Kustomize bundle. It did not deploy the
-new image or test split Kubernetes Pods. The existing shared-Pod manifests remain
-the deployed baseline until the coordinated migration above is implemented.
+new image or test split Kubernetes Pods. The shared-Pod manifests were the
+deployed baseline at the time of that review.

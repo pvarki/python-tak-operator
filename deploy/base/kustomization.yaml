@@ -27,9 +27,10 @@ configMapGenerator:
       - MESSAGING_MAX_HEAP=768
       - API_MAX_HEAP=768
       - JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2
-  - name: tak-ignite-template
-    files:
-      - TAKIgniteConfig.tpl
+      - TAK_IGNITE_SEEDS=tak-ignite:47500
+      - TAK_IGNITE_POOL_SIZE=4
+      - TAK_IGNITE_CACHE_INITIAL_BYTES=33554432
+      - TAK_IGNITE_CACHE_MAX_BYTES=268435456
   - name: tak-java-defaults
     files:
       - takserver=takserver-defaults.sh
