@@ -46,8 +46,6 @@ jobs:
           python-version: "3.14"
           uv-version: "0.12.13"
       - name: Run prek checks
-        env:
-          SKIP: no-commit-to-branch
         run: uv run --locked prek run --all-files
 
   test:
@@ -110,11 +108,17 @@ jobs:
       - name: Build test target
         run: >-
           docker build
-          --target test --tag takoperator:test .
+          --load --target test --tag takoperator:test .
+      - name: Run container checks and tests
+        run: docker run --rm takoperator:test
       - name: Build production target
         run: >-
           docker build
-          --target production --tag takoperator:production .
+          --load --target production --tag takoperator:production .
+      - name: Verify production JNI runtime
+        run: |
+          docker run --rm takoperator:production takoperator --version
+          docker run --rm -i takoperator:production python < docker/check-runtime.py
 
   publish:
     name: Publish Docker image
